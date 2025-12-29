@@ -25,6 +25,111 @@
 - **GitHub Actions Integration**: Trigger Claude Code tasks in your GitHub workflows.
 - **Plugin System**: Extend functionality with custom transformers.
 
+## 🏗️ Architecture
+
+### High-Level Overview
+
+```mermaid
+flowchart LR
+    subgraph Client
+        CC[Claude Code CLI]
+    end
+
+    subgraph CCR[Claude Code Router]
+        direction TB
+        Server[Fastify Server<br/>localhost:3456]
+        Auth[Auth Middleware]
+        Router[Router Logic]
+        Agents[Agent System]
+        Transform[Transformers]
+    end
+
+    subgraph Providers[LLM Providers]
+        OR[OpenRouter]
+        DS[DeepSeek]
+        GM[Gemini]
+        OL[Ollama]
+        AZ[Azure]
+        More[...]
+    end
+
+    CC -->|"ANTHROPIC_BASE_URL<br/>=localhost:3456"| Server
+    Server --> Auth
+    Auth --> Router
+    Router --> Agents
+    Agents --> Transform
+    Transform --> OR
+    Transform --> DS
+    Transform --> GM
+    Transform --> OL
+    Transform --> AZ
+    Transform --> More
+```
+
+### Request Flow
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code
+    participant CCR as Router Server
+    participant Auth as Auth Middleware
+    participant R as Router Logic
+    participant T as Transformer
+    participant LLM as LLM Provider
+
+    CC->>CCR: POST /v1/messages
+    CCR->>Auth: Validate API Key
+    Auth->>R: Route Request
+
+    Note over R: Routing Priority:<br/>1. Web Search<br/>2. Thinking Mode<br/>3. Long Context<br/>4. Background<br/>5. Default
+
+    R->>R: Calculate Token Count
+    R->>R: Select Model
+    R->>T: Transform Request
+    T->>LLM: Forward to Provider
+    LLM-->>T: SSE Response Stream
+    T-->>CCR: Transform Response
+    CCR-->>CC: Stream to Client
+```
+
+### Routing Decision Tree
+
+```mermaid
+flowchart TD
+    A[Incoming Request] --> B{Web Search<br/>tools present?}
+    B -->|Yes| C[Use webSearch Model]
+    B -->|No| D{Thinking<br/>enabled?}
+    D -->|Yes| E[Use think Model]
+    D -->|No| F{Token count<br/>> threshold?}
+    F -->|Yes| G[Use longContext Model]
+    F -->|No| H{Claude Haiku<br/>requested?}
+    H -->|Yes| I[Use background Model]
+    H -->|No| J{Explicit<br/>provider,model?}
+    J -->|Yes| K[Use Specified Model]
+    J -->|No| L[Use default Model]
+```
+
+### Project Structure
+
+```
+claude-code-router/
+├── src/
+│   ├── cli.ts              # CLI entry point (ccr command)
+│   ├── index.ts            # Server initialization & hooks
+│   ├── server.ts           # API endpoint definitions
+│   ├── constants.ts        # Configuration paths
+│   ├── agents/             # Agent system (image processing, etc.)
+│   ├── middleware/         # Auth middleware
+│   └── utils/
+│       ├── router.ts       # Core routing logic
+│       ├── cache.ts        # Session token usage cache
+│       ├── statusline.ts   # Shell status line integration
+│       └── ...
+├── ui/                     # React-based configuration UI
+├── config.schema.json      # JSON schema for config validation
+└── config.example.json     # Example configuration
+```
+
 ## 🚀 Getting Started
 
 ### 1. Installation
@@ -529,6 +634,48 @@ jobs:
 > **Note**: When running in GitHub Actions or other automation environments, make sure to set `"NON_INTERACTIVE_MODE": true` in your configuration to prevent the process from hanging due to stdin handling issues.
 
 This setup allows for interesting automations, like running tasks during off-peak hours to reduce API costs.
+
+## 🤝 Contributing
+
+Contributions are welcome! Here are some ways you can help:
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/musistudio/claude-code-router.git
+cd claude-code-router
+
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Run locally
+node dist/cli.js start
+```
+
+### Areas for Contribution
+
+| Area | Description | Difficulty |
+|------|-------------|------------|
+| **Testing** | Add unit tests for router logic, transformers | Medium |
+| **Type Safety** | Replace `any` types with proper TypeScript types | Easy-Medium |
+| **New Transformers** | Add support for new LLM providers | Medium |
+| **Documentation** | Improve API docs, add examples | Easy |
+| **UI Improvements** | Enhance the React configuration UI | Medium |
+| **Error Handling** | Add better error messages and recovery | Medium |
+
+### Configuration Schema
+
+The project includes a JSON schema (`config.schema.json`) for config validation. When adding new configuration options, please update the schema accordingly.
+
+### Code Style
+
+- Use TypeScript for all new code
+- Add JSDoc comments for public functions
+- Write comments in English
 
 ## 📝 Further Reading
 
