@@ -7,6 +7,21 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "
 import { homedir } from "os";
 import {calculateTokenCount} from "./utils/router";
 
+/**
+ * Create and configure the router server instance
+ *
+ * Sets up all API endpoints for:
+ * - Token counting (/v1/messages/count_tokens)
+ * - Configuration management (/api/config)
+ * - Transformer listing (/api/transformers)
+ * - Service restart (/api/restart)
+ * - Update management (/api/update/*)
+ * - Log management (/api/logs/*)
+ * - Static UI file serving (/ui/*)
+ *
+ * @param config - Server configuration object
+ * @returns Configured Server instance from @musistudio/llms
+ */
 export const createServer = (config: any): Server => {
   const server = new Server(config);
 

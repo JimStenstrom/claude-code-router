@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/musistudio/claude-code-router/config.schema.json",
+  "title": "Claude Code Router Configuration",
+  "description": "Configuration schema for Claude Code Router - routes Claude Code requests to different LLM providers",
+  "type": "object",
+  "properties": {
+    "HOST": {
+      "type": "string",
+      "description": "Host address for the router server",
+      "default": "127.0.0.1",
+      "examples": ["127.0.0.1", "0.0.0.0"]
+    },
+    "PORT": {
+      "type": "integer",
+      "description": "Port number for the router server",
+      "default": 3456,
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "APIKEY": {
+      "type": "string",
+      "description": "API key for authenticating requests to the router. If not set, only localhost connections are allowed"
+    },
+    "LOG": {
+      "type": "boolean",
+      "description": "Enable or disable logging",
+      "default": true
+    },
+    "LOG_LEVEL": {
+      "type": "string",
+      "description": "Log level for the application",
+      "enum": ["trace", "debug", "info", "warn", "error", "fatal"],
+      "default": "debug"
+    },
+    "API_TIMEOUT_MS": {
+      "type": "integer",
+      "description": "Timeout for API requests in milliseconds",
+      "default": 600000,
+      "minimum": 1000
+    },
+    "PROXY_URL": {
+      "type": "string",
+      "description": "Proxy URL for outgoing requests",
+      "format": "uri"
+    },
+    "CLAUDE_PATH": {
+      "type": "string",
+      "description": "Path to the Claude CLI executable"
+    },
+    "CUSTOM_ROUTER_PATH": {
+      "type": "string",
+      "description": "Path to a custom JavaScript router module"
+    },
+    "REWRITE_SYSTEM_PROMPT": {
+      "type": "string",
+      "description": "Path to a file containing a custom system prompt to rewrite the default"
+    },
+    "NON_INTERACTIVE_MODE": {
+      "type": "boolean",
+      "description": "Enable non-interactive mode for CI/CD environments",
+      "default": false
+    },
+    "Providers": {
+      "type": "array",
+      "description": "List of LLM provider configurations",
+      "items": {
+        "$ref": "#/definitions/Provider"
+      }
+    },
+    "Router": {
+      "$ref": "#/definitions/RouterConfig"
+    },
+    "transformers": {
+      "type": "array",
+      "description": "Custom transformer configurations",
+      "items": {
+        "$ref": "#/definitions/CustomTransformer"
+      }
+    },
+    "StatusLine": {
+      "type": "object",
+      "description": "Status line configuration for shell integration",
+      "properties": {
+        "currentStyle": {
+          "type": "string",
+          "description": "Current style to use",
+          "enum": ["default", "powerline", "simple"]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "Provider": {
+      "type": "object",
+      "description": "LLM provider configuration",
+      "required": ["name", "api_base_url", "models"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for this provider",
+          "minLength": 1
+        },
+        "api_base_url": {
+          "type": "string",
+          "description": "Base URL for the provider's API",
+          "format": "uri"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key for the provider. Supports environment variable interpolation with ${VAR_NAME}"
+        },
+        "models": {
+          "type": "array",
+          "description": "List of model names available from this provider",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "transformer": {
+          "$ref": "#/definitions/TransformerConfig"
+        }
+      }
+    },
+    "TransformerConfig": {
+      "type": "object",
+      "description": "Transformer configuration for request/response transformation",
+      "properties": {
+        "use": {
+          "type": "array",
+          "description": "List of transformers to apply. Can be transformer names or [name, options] tuples",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Transformer name"
+              },
+              {
+                "type": "array",
+                "description": "Transformer with options [name, options]",
+                "items": [
+                  {
+                    "type": "string",
+                    "description": "Transformer name"
+                  },
+                  {
+                    "type": "object",
+                    "description": "Transformer options"
+                  }
+                ],
+                "minItems": 2,
+                "maxItems": 2
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "Model-specific transformer overrides",
+        "properties": {
+          "use": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "array" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "RouterConfig": {
+      "type": "object",
+      "description": "Routing configuration for different request types",
+      "properties": {
+        "default": {
+          "type": "string",
+          "description": "Default route in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        },
+        "background": {
+          "type": "string",
+          "description": "Route for background/Haiku requests in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        },
+        "think": {
+          "type": "string",
+          "description": "Route for requests with extended thinking enabled in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        },
+        "longContext": {
+          "type": "string",
+          "description": "Route for long context requests in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        },
+        "longContextThreshold": {
+          "type": "integer",
+          "description": "Token count threshold for triggering long context routing",
+          "default": 60000,
+          "minimum": 1000
+        },
+        "webSearch": {
+          "type": "string",
+          "description": "Route for requests with web search tools in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        },
+        "image": {
+          "type": "string",
+          "description": "Route for image-related requests in format 'provider,model'",
+          "pattern": "^[^,]+,[^,]+$"
+        }
+      }
+    },
+    "CustomTransformer": {
+      "type": "object",
+      "description": "Custom transformer plugin configuration",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the custom transformer JavaScript file"
+        },
+        "options": {
+          "type": "object",
+          "description": "Options to pass to the custom transformer"
+        }
+      }
+    }
+  }
+}

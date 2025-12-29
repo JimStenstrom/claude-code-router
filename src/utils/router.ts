@@ -13,11 +13,20 @@ import { LRUCache } from "lru-cache";
 
 const enc = get_encoding("cl100k_base");
 
+/**
+ * Calculate the total token count for a request
+ * Uses tiktoken with cl100k_base encoding to count tokens in messages, system prompts, and tools
+ *
+ * @param messages - Array of message parameters from the request
+ * @param system - System prompt, can be a string or array of text blocks
+ * @param tools - Array of tool definitions
+ * @returns Total token count for the request
+ */
 export const calculateTokenCount = (
   messages: MessageParam[],
   system: any,
   tools: Tool[]
-) => {
+): number => {
   let tokenCount = 0;
   if (Array.isArray(messages)) {
     messages.forEach((message) => {
@@ -67,7 +76,12 @@ export const calculateTokenCount = (
   return tokenCount;
 };
 
-const readConfigFile = async (filePath: string) => {
+/**
+ * Read and parse a JSON configuration file
+ * @param filePath - Path to the configuration file
+ * @returns Parsed configuration object, or null if file doesn't exist or parsing fails
+ */
+const readConfigFile = async (filePath: string): Promise<any | null> => {
   try {
     await access(filePath);
     const content = await readFile(filePath, "utf8");
@@ -77,7 +91,14 @@ const readConfigFile = async (filePath: string) => {
   }
 };
 
-const getProjectSpecificRouter = async (req: any) => {
+/**
+ * Get project-specific router configuration based on session ID
+ * Checks for session-specific config first, then project-level config
+ *
+ * @param req - Request object containing sessionId
+ * @returns Project-specific router config, or undefined to use global config
+ */
+const getProjectSpecificRouter = async (req: any): Promise<any | undefined> => {
   // Check if there is a project-specific configuration
   if (req.sessionId) {
     const project = await searchProjectBySession(req.sessionId);
@@ -103,12 +124,30 @@ const getProjectSpecificRouter = async (req: any) => {
   return undefined; // Return undefined to use the original configuration
 };
 
+/**
+ * Determine which model to use for a request based on routing rules
+ *
+ * Priority order:
+ * 1. Explicit provider,model format in request
+ * 2. Long context model (if token count exceeds threshold)
+ * 3. Subagent model (if specified in system prompt)
+ * 4. Background model (for Claude Haiku requests)
+ * 5. Web search model (if web_search tools present)
+ * 6. Think model (if thinking is enabled)
+ * 7. Default model
+ *
+ * @param req - Request object with body containing model and tools
+ * @param tokenCount - Calculated token count for the request
+ * @param config - Application configuration
+ * @param lastUsage - Previous session's token usage for context-aware routing
+ * @returns Model identifier in "provider,model" format
+ */
 const getUseModel = async (
   req: any,
   tokenCount: number,
   config: any,
   lastUsage?: Usage | undefined
-) => {
+): Promise<string> => {
   const projectSpecificRouter = await getProjectSpecificRouter(req);
   const Router = projectSpecificRouter || config.Router;
 
@@ -179,7 +218,21 @@ const getUseModel = async (
   return Router!.default;
 };
 
-export const router = async (req: any, _res: any, context: any) => {
+/**
+ * Main router middleware for handling LLM request routing
+ *
+ * This function:
+ * - Extracts session ID from request metadata
+ * - Calculates token count for the request
+ * - Applies custom router if configured
+ * - Determines the appropriate model based on routing rules
+ * - Modifies req.body.model with the selected model
+ *
+ * @param req - Fastify request object
+ * @param _res - Fastify reply object (unused)
+ * @param context - Context containing config and event emitter
+ */
+export const router = async (req: any, _res: any, context: any): Promise<void> => {
   const { config, event } = context;
   // Parse sessionId from metadata.user_id
   if (req.body.metadata?.user_id) {
@@ -236,6 +289,16 @@ const sessionProjectCache = new LRUCache<string, string | null>({
   max: 1000,
 });
 
+/**
+ * Search for a project by session ID
+ *
+ * Looks through ~/.claude/projects/ directories to find which project
+ * contains the session file (sessionId.jsonl). Results are cached using
+ * an LRU cache with max 1000 entries.
+ *
+ * @param sessionId - The session identifier to search for
+ * @returns Project folder name if found, null otherwise
+ */
 export const searchProjectBySession = async (
   sessionId: string
 ): Promise<string | null> => {
