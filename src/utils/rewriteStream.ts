@@ -1,7 +1,9 @@
-/**rewriteStream
- * 读取源readablestream，返回一个新的readablestream，由processor对源数据进行处理后将返回的新值推送到新的stream，如果没有返回值则不推送
- * @param stream
- * @param processor
+/**
+ * Reads from a source ReadableStream and returns a new ReadableStream.
+ * The processor processes source data and pushes returned values to the new stream.
+ * If no value is returned, nothing is pushed.
+ * @param stream - The source ReadableStream to read from
+ * @param processor - Function to process each chunk and optionally return transformed data
  */
 export const rewriteStream = (stream: ReadableStream, processor: (data: any, controller: ReadableStreamController<any>) => Promise<any>): ReadableStream => {
   const reader = stream.getReader()

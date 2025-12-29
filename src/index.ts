@@ -163,7 +163,7 @@ async function run(options: RunOptions = {}) {
 
       for (const agent of agentsManager.getAllAgents()) {
         if (agent.shouldHandle(req, config)) {
-          // 设置agent标识
+          // Set agent identifier
           useAgents.push(agent.name)
 
           // change request body
@@ -210,10 +210,10 @@ async function run(options: RunOptions = {}) {
           let currentToolId = ''
           const toolMessages: any[] = []
           const assistantMessages: any[] = []
-          // 存储Anthropic格式的消息体，区分文本和工具类型
+          // Store Anthropic-formatted message body, distinguishing text and tool types
           return done(null, rewriteStream(eventStream, async (data, controller) => {
             try {
-              // 检测工具调用开始
+              // Detect tool call start
               if (data.event === 'content_block_start' && data?.data?.content_block?.name) {
                 const agent = req.agents.find((name: string) => agentsManager.getAgent(name)?.tools.get(data.data.content_block.name))
                 if (agent) {
@@ -225,13 +225,13 @@ async function run(options: RunOptions = {}) {
                 }
               }
 
-              // 收集工具参数
+              // Collect tool arguments
               if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data?.delta?.type === 'input_json_delta') {
                 currentToolArgs += data.data?.delta?.partial_json;
                 return undefined;
               }
 
-              // 工具调用完成，处理agent调用
+              // Tool call completed, process agent invocation
               if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data.type === 'content_block_stop') {
                 try {
                   const args = JSON5.parse(currentToolArgs);
@@ -293,7 +293,7 @@ async function run(options: RunOptions = {}) {
                       continue
                     }
 
-                    // 检查流是否仍然可写
+                    // Check if the stream is still writable
                     if (!controller.desiredSize) {
                       break;
                     }
@@ -301,7 +301,7 @@ async function run(options: RunOptions = {}) {
                     controller.enqueue(value)
                   }catch (readError: any) {
                     if (readError.name === 'AbortError' || readError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                      abortController.abort(); // 中止所有相关操作
+                      abortController.abort(); // Abort all related operations
                       break;
                     }
                     throw readError;
@@ -314,13 +314,13 @@ async function run(options: RunOptions = {}) {
             }catch (error: any) {
               console.error('Unexpected error in stream processing:', error);
 
-              // 处理流提前关闭的错误
+              // Handle stream premature close errors
               if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
                 abortController.abort();
                 return undefined;
               }
 
-              // 其他错误仍然抛出
+              // Re-throw other errors
               throw error;
             }
           }).pipeThrough(new SSESerializerTransform()))

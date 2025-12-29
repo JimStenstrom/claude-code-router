@@ -73,10 +73,10 @@ export const createServer = (config: any): Server => {
     return reply.redirect("/ui/");
   });
 
-  // 版本检查端点
+  // Version check endpoint
   server.app.get("/api/update/check", async (req, reply) => {
     try {
-      // 获取当前版本
+      // Get current version
       const currentVersion = require("../package.json").version;
       const { hasUpdate, latestVersion, changelog } = await checkForUpdates(currentVersion);
 
@@ -91,17 +91,17 @@ export const createServer = (config: any): Server => {
     }
   });
 
-  // 执行更新端点
+  // Perform update endpoint
   server.app.post("/api/update/perform", async (req, reply) => {
     try {
-      // 只允许完全访问权限的用户执行更新
+      // Only allow users with full access to perform updates
       const accessLevel = (req as any).accessLevel || "restricted";
       if (accessLevel !== "full") {
         reply.status(403).send("Full access required to perform updates");
         return;
       }
 
-      // 执行更新逻辑
+      // Execute update logic
       const result = await performUpdate();
 
       return result;
@@ -111,7 +111,7 @@ export const createServer = (config: any): Server => {
     }
   });
 
-  // 获取日志文件列表端点
+  // Get log files list endpoint
   server.app.get("/api/logs/files", async (req, reply) => {
     try {
       const logDir = join(homedir(), ".claude-code-router", "logs");
@@ -134,7 +134,7 @@ export const createServer = (config: any): Server => {
           }
         }
 
-        // 按修改时间倒序排列
+        // Sort by modification time in descending order
         logFiles.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
       }
 
@@ -145,17 +145,17 @@ export const createServer = (config: any): Server => {
     }
   });
 
-  // 获取日志内容端点
+  // Get log content endpoint
   server.app.get("/api/logs", async (req, reply) => {
     try {
       const filePath = (req.query as any).file as string;
       let logFilePath: string;
 
       if (filePath) {
-        // 如果指定了文件路径，使用指定的路径
+        // If file path is specified, use the specified path
         logFilePath = filePath;
       } else {
-        // 如果没有指定文件路径，使用默认的日志文件路径
+        // If no file path is specified, use the default log file path
         logFilePath = join(homedir(), ".claude-code-router", "logs", "app.log");
       }
 
@@ -173,17 +173,17 @@ export const createServer = (config: any): Server => {
     }
   });
 
-  // 清除日志内容端点
+  // Clear log content endpoint
   server.app.delete("/api/logs", async (req, reply) => {
     try {
       const filePath = (req.query as any).file as string;
       let logFilePath: string;
 
       if (filePath) {
-        // 如果指定了文件路径，使用指定的路径
+        // If file path is specified, use the specified path
         logFilePath = filePath;
       } else {
-        // 如果没有指定文件路径，使用默认的日志文件路径
+        // If no file path is specified, use the default log file path
         logFilePath = join(homedir(), ".claude-code-router", "logs", "app.log");
       }
 
