@@ -1,5 +1,6 @@
 import { IAgent, ITool } from "./type";
 import { LRUCache } from "lru-cache";
+import { INTERNAL_FETCH_TIMEOUT_MS, DEFAULT_PORT } from "../constants";
 import type {
   ImageSource,
   ImageCacheEntry,
@@ -209,9 +210,12 @@ export class ImageAgent implements IAgent {
           });
         }
 
-        // Send to analysis agent and get response
+        // Send to analysis agent and get response with timeout
+        const fetchController = new AbortController();
+        const timeoutId = setTimeout(() => fetchController.abort(), INTERNAL_FETCH_TIMEOUT_MS);
+
         const agentResponse: ImageAnalysisResponse | null = await fetch(
-          `http://127.0.0.1:${context.config.PORT || 3456}/v1/messages`,
+          `http://127.0.0.1:${context.config.PORT || DEFAULT_PORT}/v1/messages`,
           {
             method: "POST",
             headers: {
@@ -237,10 +241,20 @@ Always ensure that your response reflects a clear, accurate interpretation of th
               ],
               stream: false,
             }),
+            signal: fetchController.signal,
           }
         )
-          .then((res) => res.json() as Promise<ImageAnalysisResponse>)
-          .catch(() => {
+          .then((res) => {
+            clearTimeout(timeoutId);
+            return res.json() as Promise<ImageAnalysisResponse>;
+          })
+          .catch((error) => {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+              console.error('Image analysis fetch timed out after', INTERNAL_FETCH_TIMEOUT_MS, 'ms');
+            } else {
+              console.error('Image analysis fetch error:', error);
+            }
             return null;
           });
         if (!agentResponse || !agentResponse.content) {

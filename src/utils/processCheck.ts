@@ -1,8 +1,57 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { PID_FILE, REFERENCE_COUNT_FILE } from '../constants';
+import { existsSync, readFileSync, writeFileSync, openSync, closeSync, unlinkSync } from 'fs';
+import { PID_FILE, REFERENCE_COUNT_FILE, MAX_PID_VALUE } from '../constants';
 import { readConfigFile } from '.';
 import find from 'find-process';
 import { execSync } from 'child_process';
+
+const LOCK_FILE = `${REFERENCE_COUNT_FILE}.lock`;
+const LOCK_TIMEOUT_MS = 5000;
+const LOCK_RETRY_INTERVAL_MS = 50;
+
+/**
+ * Acquire a file lock with timeout
+ * Returns true if lock acquired, false otherwise
+ */
+function acquireLock(): boolean {
+    const startTime = Date.now();
+    while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+        try {
+            // O_CREAT | O_EXCL - fails if file exists (atomic check-and-create)
+            const fd = openSync(LOCK_FILE, 'wx');
+            closeSync(fd);
+            return true;
+        } catch (e: unknown) {
+            const err = e as NodeJS.ErrnoException;
+            if (err.code === 'EEXIST') {
+                // Lock file exists, check if it's stale (older than timeout)
+                try {
+                    const stats = require('fs').statSync(LOCK_FILE);
+                    if (Date.now() - stats.mtimeMs > LOCK_TIMEOUT_MS) {
+                        // Stale lock, remove it
+                        try { unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+                    }
+                } catch { /* ignore stat errors */ }
+
+                // Wait before retrying
+                const waitUntil = Date.now() + LOCK_RETRY_INTERVAL_MS;
+                while (Date.now() < waitUntil) { /* busy wait */ }
+            } else {
+                // Other error, fail immediately
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Release the file lock
+ */
+function releaseLock(): void {
+    try {
+        unlinkSync(LOCK_FILE);
+    } catch { /* ignore */ }
+}
 
 export async function isProcessRunning(pid: number): Promise<boolean> {
     try {
@@ -13,22 +62,44 @@ export async function isProcessRunning(pid: number): Promise<boolean> {
     }
 }
 
-export function incrementReferenceCount() {
-    let count = 0;
-    if (existsSync(REFERENCE_COUNT_FILE)) {
-        count = parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+/**
+ * Atomically increment the reference count with file locking
+ */
+export function incrementReferenceCount(): void {
+    if (!acquireLock()) {
+        console.warn('Failed to acquire lock for reference count increment');
+        return;
     }
-    count++;
-    writeFileSync(REFERENCE_COUNT_FILE, count.toString());
+    try {
+        let count = 0;
+        if (existsSync(REFERENCE_COUNT_FILE)) {
+            count = parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+        }
+        count++;
+        writeFileSync(REFERENCE_COUNT_FILE, count.toString());
+    } finally {
+        releaseLock();
+    }
 }
 
-export function decrementReferenceCount() {
-    let count = 0;
-    if (existsSync(REFERENCE_COUNT_FILE)) {
-        count = parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+/**
+ * Atomically decrement the reference count with file locking
+ */
+export function decrementReferenceCount(): void {
+    if (!acquireLock()) {
+        console.warn('Failed to acquire lock for reference count decrement');
+        return;
     }
-    count = Math.max(0, count - 1);
-    writeFileSync(REFERENCE_COUNT_FILE, count.toString());
+    try {
+        let count = 0;
+        if (existsSync(REFERENCE_COUNT_FILE)) {
+            count = parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+        }
+        count = Math.max(0, count - 1);
+        writeFileSync(REFERENCE_COUNT_FILE, count.toString());
+    } finally {
+        releaseLock();
+    }
 }
 
 export function getReferenceCount(): number {
@@ -48,7 +119,7 @@ export function isServiceRunning(): boolean {
         const pidStr = readFileSync(PID_FILE, 'utf-8').trim();
         pid = parseInt(pidStr, 10);
         // Validate PID is a positive integer within valid range (prevents command injection)
-        if (isNaN(pid) || pid <= 0 || pid > 4194304 || !/^\d+$/.test(pidStr)) {
+        if (isNaN(pid) || pid <= 0 || pid > MAX_PID_VALUE || !/^\d+$/.test(pidStr)) {
             // PID file content is invalid or potentially malicious
             cleanupPidFile();
             return false;

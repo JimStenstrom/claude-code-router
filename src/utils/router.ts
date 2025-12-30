@@ -7,7 +7,7 @@ import { sessionUsageCache, Usage } from "./cache";
 import { readFile, access } from "fs/promises";
 import { opendir, stat } from "fs/promises";
 import { join } from "path";
-import { CLAUDE_PROJECTS_DIR, HOME_DIR } from "../constants";
+import { CLAUDE_PROJECTS_DIR, HOME_DIR, DEFAULT_LONG_CONTEXT_THRESHOLD } from "../constants";
 import { LRUCache } from "lru-cache";
 import type {
   AppConfig,
@@ -177,7 +177,7 @@ const getUseModel = async (
   }
 
   // if tokenCount is greater than the configured threshold, use the long context model
-  const longContextThreshold = Router.longContextThreshold || 60000;
+  const longContextThreshold = Router.longContextThreshold || DEFAULT_LONG_CONTEXT_THRESHOLD;
   const lastUsageThreshold =
     lastUsage &&
     lastUsage.input_tokens > longContextThreshold &&

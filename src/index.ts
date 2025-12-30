@@ -12,9 +12,8 @@ import {
   isServiceRunning,
   savePid,
 } from "./utils/processCheck";
-import { CONFIG_FILE } from "./constants";
+import { CONFIG_FILE, HOME_DIR, INTERNAL_FETCH_TIMEOUT_MS, DEFAULT_PORT } from "./constants";
 import { createStream, type Generator } from 'rotating-file-stream';
-import { HOME_DIR } from "./constants";
 import { sessionUsageCache } from "./utils/cache";
 import { SSEParserTransform } from "./utils/SSEParser.transform";
 import { SSESerializerTransform } from "./utils/SSESerializer.transform";
@@ -278,7 +277,14 @@ async function run(options: RunOptions = {}) {
                   currentToolArgs = '';
                   currentToolId = '';
                 } catch (e) {
-                  console.log(e);
+                  // Log error with context for debugging
+                  console.error('Error executing agent tool:', currentToolName, e);
+                  // Reset state to allow processing to continue
+                  currentAgent = undefined;
+                  currentToolIndex = -1;
+                  currentToolName = '';
+                  currentToolArgs = '';
+                  currentToolId = '';
                 }
                 return undefined;
               }
@@ -292,42 +298,61 @@ async function run(options: RunOptions = {}) {
                   role: 'user',
                   content: toolMessages
                 });
-                const response = await fetch(`http://127.0.0.1:${config.PORT || 3456}/v1/messages`, {
-                  method: "POST",
-                  headers: {
-                    'x-api-key': config.APIKEY || '',
-                    'content-type': 'application/json',
-                  },
-                  body: JSON.stringify(routerReq.body),
-                });
-                if (!response.ok) {
-                  return undefined;
-                }
-                const stream = response.body!.pipeThrough(new SSEParserTransform());
-                const reader = stream.getReader();
-                while (true) {
-                  try {
-                    const { value, done: streamDone } = await reader.read();
-                    if (streamDone) {
-                      break;
-                    }
-                    if (value.event && ['message_start', 'message_stop'].includes(value.event)) {
-                      continue;
-                    }
 
-                    // Check if stream is still writable
-                    if (!controller.desiredSize) {
-                      break;
-                    }
+                // Create abort controller for timeout
+                const fetchController = new AbortController();
+                const timeoutId = setTimeout(() => fetchController.abort(), INTERNAL_FETCH_TIMEOUT_MS);
 
-                    controller.enqueue(value);
-                  } catch (readError: unknown) {
-                    const nodeError = readError as NodeError;
-                    if (nodeError.name === 'AbortError' || nodeError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                      abortController.abort(); // Abort all related operations
-                      break;
+                try {
+                  const response = await fetch(`http://127.0.0.1:${config.PORT || DEFAULT_PORT}/v1/messages`, {
+                    method: "POST",
+                    headers: {
+                      'x-api-key': config.APIKEY || '',
+                      'content-type': 'application/json',
+                    },
+                    body: JSON.stringify(routerReq.body),
+                    signal: fetchController.signal,
+                  });
+                  clearTimeout(timeoutId);
+
+                  if (!response.ok) {
+                    console.error('Internal fetch failed with status:', response.status);
+                    return undefined;
+                  }
+
+                  const stream = response.body!.pipeThrough(new SSEParserTransform());
+                  const reader = stream.getReader();
+                  while (true) {
+                    try {
+                      const { value, done: streamDone } = await reader.read();
+                      if (streamDone) {
+                        break;
+                      }
+                      if (value.event && ['message_start', 'message_stop'].includes(value.event)) {
+                        continue;
+                      }
+
+                      // Check if stream is still writable
+                      if (!controller.desiredSize) {
+                        break;
+                      }
+
+                      controller.enqueue(value);
+                    } catch (readError: unknown) {
+                      const nodeError = readError as NodeError;
+                      if (nodeError.name === 'AbortError' || nodeError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+                        abortController.abort(); // Abort all related operations
+                        break;
+                      }
+                      throw readError;
                     }
-                    throw readError;
+                  }
+                } catch (fetchError: unknown) {
+                  const nodeError = fetchError as NodeError;
+                  if (nodeError.name === 'AbortError') {
+                    console.error('Internal fetch timed out after', INTERNAL_FETCH_TIMEOUT_MS, 'ms');
+                  } else {
+                    console.error('Internal fetch error:', fetchError);
                   }
                 }
                 return undefined;
