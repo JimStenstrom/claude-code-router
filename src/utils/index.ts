@@ -173,8 +173,8 @@ export const initConfig = async () => {
   return config;
 };
 
-// 导出日志清理函数
+// Export log cleanup function
 export { cleanupLogFiles };
 
-// 导出更新功能
+// Export update functionality
 export { checkForUpdates, performUpdate } from "./update";
