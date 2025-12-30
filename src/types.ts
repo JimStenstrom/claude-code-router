@@ -400,3 +400,52 @@ export interface SSEEventData {
     output_tokens: number;
   };
 }
+
+// ============================================================================
+// Message Types for Agent Tool Handling
+// ============================================================================
+
+/**
+ * Tool use message content for assistant messages
+ */
+export interface ToolUseMessage {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Tool result message content for user messages
+ */
+export interface ToolResultMessage {
+  tool_use_id: string;
+  type: "tool_result";
+  content: string | undefined;
+}
+
+/**
+ * Payload types for onSend hook
+ */
+export interface StreamPayloadWithUsage {
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+  error?: Error;
+}
+
+/**
+ * Node.js error with code property
+ */
+export interface NodeError extends Error {
+  code?: string;
+}
+
+/**
+ * Done callback type for Fastify onSend hook
+ */
+export type OnSendDoneCallback = (
+  err: Error | null,
+  payload: unknown
+) => void;
