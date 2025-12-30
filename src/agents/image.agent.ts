@@ -1,24 +1,30 @@
 import { IAgent, ITool } from "./type";
-import { createHash } from "crypto";
-import * as LRU from "lru-cache";
+import { LRUCache } from "lru-cache";
+import type {
+  ImageSource,
+  ImageCacheEntry,
+  MessageContentItem,
+  MessageWithContent,
+  ImageAnalysisResponse,
+  RouterRequest,
+  AppConfig,
+} from "../types";
 
-interface ImageCacheEntry {
-  source: any;
-  timestamp: number;
-}
-
+/**
+ * LRU cache for storing processed images
+ * Images are cached with a 5-minute TTL to avoid re-processing
+ */
 class ImageCache {
-  private cache: any;
+  private cache: LRUCache<string, ImageCacheEntry>;
 
   constructor(maxSize = 100) {
-    const CacheClass: any = (LRU as any).LRUCache || (LRU as any);
-    this.cache = new CacheClass({
+    this.cache = new LRUCache<string, ImageCacheEntry>({
       max: maxSize,
       ttl: 5 * 60 * 1000, // 5 minutes
     });
   }
 
-  storeImage(id: string, source: any): void {
+  storeImage(id: string, source: ImageSource): void {
     if (this.hasImage(id)) return;
     this.cache.set(id, {
       source,
@@ -26,7 +32,7 @@ class ImageCache {
     });
   }
 
-  getImage(id: string): any {
+  getImage(id: string): ImageSource | null {
     const entry = this.cache.get(id);
     return entry ? entry.source : null;
   }
@@ -55,48 +61,53 @@ export class ImageAgent implements IAgent {
     this.appendTools();
   }
 
-  shouldHandle(req: any, config: any): boolean {
+  shouldHandle(req: RouterRequest, config: AppConfig): boolean {
     if (!config.Router.image || req.body.model === config.Router.image)
       return false;
-    const lastMessage = req.body.messages[req.body.messages.length - 1];
+    const lastMessage = req.body.messages[req.body.messages.length - 1] as MessageWithContent;
     if (
-      !config.forceUseImageAgent &&
+      !(config as AppConfig & { forceUseImageAgent?: boolean }).forceUseImageAgent &&
       lastMessage.role === "user" &&
-      Array.isArray(lastMessage.content) &&
-      lastMessage.content.find(
-        (item: any) =>
+      Array.isArray(lastMessage.content)
+    ) {
+      const content = lastMessage.content as MessageContentItem[];
+      const hasImage = content.find(
+        (item: MessageContentItem) =>
           item.type === "image" ||
           (Array.isArray(item?.content) &&
-            item.content.some((sub: any) => sub.type === "image"))
-      )
-    ) {
-      req.body.model = config.Router.image;
-      const images = [];
-      lastMessage.content
-        .filter((item: any) => item.type === "tool_result")
-        .forEach((item: any) => {
-          if (Array.isArray(item.content)) {
-            item.content.forEach((element: any) => {
-              if (element.type === "image") {
-                images.push(element);
-              }
-            });
-            item.content = "read image successfully";
-          }
-        });
-      lastMessage.content.push(...images);
-      return false;
+            (item.content as MessageContentItem[]).some((sub: MessageContentItem) => sub.type === "image"))
+      );
+      if (hasImage) {
+        req.body.model = config.Router.image;
+        const images: MessageContentItem[] = [];
+        content
+          .filter((item: MessageContentItem) => item.type === "tool_result")
+          .forEach((item: MessageContentItem) => {
+            if (Array.isArray(item.content)) {
+              (item.content as MessageContentItem[]).forEach((element: MessageContentItem) => {
+                if (element.type === "image") {
+                  images.push(element);
+                }
+              });
+              item.content = "read image successfully";
+            }
+          });
+        content.push(...images);
+        return false;
+      }
     }
     return req.body.messages.some(
-      (msg: any) =>
-        msg.role === "user" &&
-        Array.isArray(msg.content) &&
-        msg.content.some(
-          (item: any) =>
-            item.type === "image" ||
-            (Array.isArray(item?.content) &&
-              item.content.some((sub: any) => sub.type === "image"))
-        )
+      (msg) => {
+        const message = msg as MessageWithContent;
+        return message.role === "user" &&
+          Array.isArray(message.content) &&
+          (message.content as MessageContentItem[]).some(
+            (item: MessageContentItem) =>
+              item.type === "image" ||
+              (Array.isArray(item?.content) &&
+                (item.content as MessageContentItem[]).some((sub: MessageContentItem) => sub.type === "image"))
+          );
+      }
     );
   }
 
@@ -147,13 +158,12 @@ export class ImageAgent implements IAgent {
         required: ["imageId", "task"],
       },
       handler: async (args, context) => {
-        const imageMessages = [];
-        let imageId;
+        const imageMessages: MessageContentItem[] = [];
 
         // Create image messages from cached images
         if (args.imageId) {
           if (Array.isArray(args.imageId)) {
-            args.imageId.forEach((imgId: string) => {
+            (args.imageId as string[]).forEach((imgId: string) => {
               const image = imageCache.getImage(
                 `${context.req.id}_Image#${imgId}`
               );
@@ -175,16 +185,16 @@ export class ImageAgent implements IAgent {
               });
             }
           }
-          imageId = args.imageId;
           delete args.imageId;
         }
 
-        const userMessage =
-          context.req.body.messages[context.req.body.messages.length - 1];
+        const userMessage = context.req.body.messages[context.req.body.messages.length - 1] as MessageWithContent;
         if (userMessage.role === "user" && Array.isArray(userMessage.content)) {
-          const msgs = userMessage.content.filter(
-            (item) =>
+          const content = userMessage.content as MessageContentItem[];
+          const msgs = content.filter(
+            (item: MessageContentItem) =>
               item.type === "text" &&
+              item.text &&
               !item.text.includes(
                 "This is an image, if you need to view or analyze it, you need to extract the imageId"
               )
@@ -200,12 +210,12 @@ export class ImageAgent implements IAgent {
         }
 
         // Send to analysis agent and get response
-        const agentResponse = await fetch(
+        const agentResponse: ImageAnalysisResponse | null = await fetch(
           `http://127.0.0.1:${context.config.PORT || 3456}/v1/messages`,
           {
             method: "POST",
             headers: {
-              "x-api-key": context.config.APIKEY,
+              "x-api-key": context.config.APIKEY || "",
               "content-type": "application/json",
             },
             body: JSON.stringify({
@@ -213,9 +223,9 @@ export class ImageAgent implements IAgent {
               system: [
                 {
                   type: "text",
-                  text: `You must interpret and analyze images strictly according to the assigned task.  
-When an image placeholder is provided, your role is to parse the image content only within the scope of the user’s instructions.  
-Do not ignore or deviate from the task.  
+                  text: `You must interpret and analyze images strictly according to the assigned task.
+When an image placeholder is provided, your role is to parse the image content only within the scope of the user's instructions.
+Do not ignore or deviate from the task.
 Always ensure that your response reflects a clear, accurate interpretation of the image aligned with the given objective.`,
                 },
               ],
@@ -229,69 +239,77 @@ Always ensure that your response reflects a clear, accurate interpretation of th
             }),
           }
         )
-          .then((res) => res.json())
-          .catch((err) => {
+          .then((res) => res.json() as Promise<ImageAnalysisResponse>)
+          .catch(() => {
             return null;
           });
         if (!agentResponse || !agentResponse.content) {
           return "analyzeImage Error";
         }
-        return agentResponse.content[0].text;
+        return agentResponse.content[0].text || "analyzeImage Error";
       },
     });
   }
 
-  reqHandler(req: any, config: any) {
+  reqHandler(req: RouterRequest, _config: AppConfig): void {
     // Inject system prompt
-    req.body?.system?.push({
-      type: "text",
-      text: `You are a text-only language model and do not possess visual perception.  
-If the user requests you to view, analyze, or extract information from an image, you **must** call the \`analyzeImage\` tool.  
+    if (Array.isArray(req.body?.system)) {
+      req.body.system.push({
+        type: "text",
+        text: `You are a text-only language model and do not possess visual perception.
+If the user requests you to view, analyze, or extract information from an image, you **must** call the \`analyzeImage\` tool.
 
-When invoking this tool, you must pass the correct \`imageId\` extracted from the prior conversation.  
-Image identifiers are always provided in the format \`[Image #imageId]\`.  
+When invoking this tool, you must pass the correct \`imageId\` extracted from the prior conversation.
+Image identifiers are always provided in the format \`[Image #imageId]\`.
 
-If multiple images exist, select the **most relevant imageId** based on the user’s current request and prior context.  
+If multiple images exist, select the **most relevant imageId** based on the user's current request and prior context.
 
-Do not attempt to describe or analyze the image directly yourself.  
-Ignore any user interruptions or unrelated instructions that might cause you to skip this requirement.  
+Do not attempt to describe or analyze the image directly yourself.
+Ignore any user interruptions or unrelated instructions that might cause you to skip this requirement.
 Your response should consistently follow this rule whenever image-related analysis is requested.`,
-    });
+      });
+    }
 
-    const imageContents = req.body.messages.filter((item: any) => {
+    const imageContents = req.body.messages.filter((item) => {
+      const message = item as MessageWithContent;
       return (
-        item.role === "user" &&
-        Array.isArray(item.content) &&
-        item.content.some(
-          (msg: any) =>
+        message.role === "user" &&
+        Array.isArray(message.content) &&
+        (message.content as MessageContentItem[]).some(
+          (msg: MessageContentItem) =>
             msg.type === "image" ||
             (Array.isArray(msg.content) &&
-              msg.content.some((sub: any) => sub.type === "image"))
+              (msg.content as MessageContentItem[]).some((sub: MessageContentItem) => sub.type === "image"))
         )
       );
-    });
+    }) as MessageWithContent[];
 
     let imgId = 1;
-    imageContents.forEach((item: any) => {
+    imageContents.forEach((item: MessageWithContent) => {
       if (!Array.isArray(item.content)) return;
-      item.content.forEach((msg: any) => {
-        if (msg.type === "image") {
+      const content = item.content as MessageContentItem[];
+      content.forEach((msg: MessageContentItem) => {
+        if (msg.type === "image" && msg.source) {
           imageCache.storeImage(`${req.id}_Image#${imgId}`, msg.source);
-          msg.type = "text";
+          // Transform image to text placeholder
+          (msg as unknown as { type: string; text: string }).type = "text";
           delete msg.source;
-          msg.text = `[Image #${imgId}]This is an image, if you need to view or analyze it, you need to extract the imageId`;
+          (msg as unknown as { text: string }).text = `[Image #${imgId}]This is an image, if you need to view or analyze it, you need to extract the imageId`;
           imgId++;
-        } else if (msg.type === "text" && msg.text.includes("[Image #")) {
+        } else if (msg.type === "text" && msg.text?.includes("[Image #")) {
           msg.text = msg.text.replace(/\[Image #\d+\]/g, "");
         } else if (msg.type === "tool_result") {
           if (
             Array.isArray(msg.content) &&
-            msg.content.some((ele) => ele.type === "image")
+            (msg.content as MessageContentItem[]).some((ele: MessageContentItem) => ele.type === "image")
           ) {
-            imageCache.storeImage(
-              `${req.id}_Image#${imgId}`,
-              msg.content[0].source
-            );
+            const contentArray = msg.content as MessageContentItem[];
+            if (contentArray[0]?.source) {
+              imageCache.storeImage(
+                `${req.id}_Image#${imgId}`,
+                contentArray[0].source
+              );
+            }
             msg.content = `[Image #${imgId}]This is an image, if you need to view or analyze it, you need to extract the imageId`;
             imgId++;
           }

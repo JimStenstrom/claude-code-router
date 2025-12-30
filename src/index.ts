@@ -312,7 +312,7 @@ async function run(options: RunOptions = {}) {
                     if (streamDone) {
                       break;
                     }
-                    if (['message_start', 'message_stop'].includes(value.event)) {
+                    if (value.event && ['message_start', 'message_stop'].includes(value.event)) {
                       continue;
                     }
 

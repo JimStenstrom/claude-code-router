@@ -17,10 +17,12 @@ import type {
 import type { MessageParam, Tool } from "@anthropic-ai/sdk/resources/messages";
 
 /**
- * Extended request type for count_tokens endpoint
+ * Request body for count_tokens endpoint
  */
-interface CountTokensRequest extends FastifyRequest {
-  body: Pick<MessagesRequestBody, "messages" | "tools" | "system">;
+interface CountTokensBody {
+  messages: MessagesRequestBody["messages"];
+  tools?: MessagesRequestBody["tools"];
+  system?: MessagesRequestBody["system"];
 }
 
 /**
@@ -48,7 +50,7 @@ interface AuthenticatedRequest extends FastifyRequest {
 export const createServer = (config: ServerConfig): Server => {
   const server = new Server(config);
 
-  server.app.post("/v1/messages/count_tokens", async (req: CountTokensRequest, reply: FastifyReply) => {
+  server.app.post<{ Body: CountTokensBody }>("/v1/messages/count_tokens", async (req, reply) => {
     const { messages, tools, system } = req.body;
     const tokenCount = calculateTokenCount(
       messages as MessageParam[],

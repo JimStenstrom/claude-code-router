@@ -8,13 +8,33 @@ import {
 import { quote } from 'shell-quote';
 import minimist from "minimist";
 import { createEnvVariables } from "./createEnvVariables";
+import type { SettingsFlag, EnvironmentVariables, AppConfig } from "../types";
 
+/**
+ * Extended config interface with optional fields used in code command
+ */
+interface CodeCommandConfig {
+  PORT?: number;
+  APIKEY?: string;
+  NON_INTERACTIVE_MODE?: boolean;
+  CLAUDE_PATH?: string;
+  API_TIMEOUT_MS?: number;
+  ANTHROPIC_SMALL_FAST_MODEL?: string;
+  StatusLine?: {
+    enabled?: boolean;
+    [key: string]: unknown;
+  };
+}
 
-export async function executeCodeCommand(args: string[] = []) {
+/**
+ * Execute the Claude Code command with proper environment setup
+ * @param args Command line arguments to pass to Claude
+ */
+export async function executeCodeCommand(args: string[] = []): Promise<void> {
   // Set environment variables using shared function
-  const config = await readConfigFile();
-  const env = await createEnvVariables();
-  const settingsFlag = {
+  const config = await readConfigFile() as CodeCommandConfig;
+  const env = await createEnvVariables() as EnvironmentVariables;
+  const settingsFlag: SettingsFlag = {
     env
   };
   if (config?.StatusLine?.enabled) {
@@ -22,7 +42,7 @@ export async function executeCodeCommand(args: string[] = []) {
       type: "command",
       command: "ccr statusline",
       padding: 0,
-    }
+    };
   }
   // args.push('--settings', `${JSON.stringify(settingsFlag)}`);
 

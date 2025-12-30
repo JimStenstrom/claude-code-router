@@ -247,6 +247,8 @@ export interface RouterRequest {
   accessLevel?: "full" | "restricted";
   log: RouterLogger;
   url: string;
+  /** Unique request identifier for caching and tracking */
+  id?: string;
 }
 
 // ============================================================================
@@ -346,15 +348,23 @@ export interface LogsQueryParams {
 // ============================================================================
 
 /**
+ * Property definition for tool input schema
+ */
+export interface ToolInputProperty {
+  type: string;
+  description?: string;
+  enum?: string[];
+  items?: ToolInputProperty | ToolInputSchema;
+  properties?: Record<string, ToolInputProperty>;
+  required?: string[];
+}
+
+/**
  * Tool input schema
  */
 export interface ToolInputSchema {
   type: "object";
-  properties: Record<string, {
-    type: string;
-    description?: string;
-    enum?: string[];
-  }>;
+  properties: Record<string, ToolInputProperty>;
   required?: string[];
 }
 
@@ -449,3 +459,117 @@ export type OnSendDoneCallback = (
   err: Error | null,
   payload: unknown
 ) => void;
+
+// ============================================================================
+// Image Agent Types
+// ============================================================================
+
+/**
+ * Image source structure for Anthropic API
+ */
+export interface ImageSource {
+  type: "base64" | "url";
+  media_type?: string;
+  data?: string;
+  url?: string;
+}
+
+/**
+ * Image content block for messages
+ */
+export interface ImageContentBlock {
+  type: "image";
+  source: ImageSource;
+}
+
+/**
+ * Image cache entry for storing processed images
+ */
+export interface ImageCacheEntry {
+  source: ImageSource;
+  timestamp: number;
+}
+
+/**
+ * Message content item with image or tool_result
+ */
+export interface MessageContentItem {
+  type: "text" | "image" | "tool_result" | "tool_use";
+  text?: string;
+  source?: ImageSource;
+  content?: string | MessageContentItem[];
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
+ * Message structure with content array
+ */
+export interface MessageWithContent {
+  role: "user" | "assistant";
+  content: string | MessageContentItem[];
+}
+
+/**
+ * Image analysis response from the API
+ */
+export interface ImageAnalysisResponse {
+  content?: Array<{ type: string; text?: string }>;
+  error?: string;
+}
+
+// ============================================================================
+// Code Command Types
+// ============================================================================
+
+/**
+ * Status line settings for Claude Code
+ */
+export interface StatusLineSettings {
+  type: "command";
+  command: string;
+  padding: number;
+}
+
+/**
+ * Settings flag object for Claude Code execution
+ */
+export interface SettingsFlag {
+  env: EnvironmentVariables;
+  statusLine?: StatusLineSettings;
+}
+
+/**
+ * Environment variables for Claude Code execution
+ */
+export interface EnvironmentVariables {
+  ANTHROPIC_AUTH_TOKEN: string;
+  ANTHROPIC_API_KEY: string;
+  ANTHROPIC_BASE_URL: string;
+  NO_PROXY: string;
+  DISABLE_TELEMETRY: string;
+  DISABLE_COST_WARNINGS: string;
+  API_TIMEOUT_MS: string;
+  CLAUDE_CODE_USE_BEDROCK?: string;
+  ANTHROPIC_SMALL_FAST_MODEL?: string;
+  CI?: string;
+  FORCE_COLOR?: string;
+  NODE_NO_READLINE?: string;
+  TERM?: string;
+  [key: string]: string | undefined;
+}
+
+// ============================================================================
+// SSE Parser Types
+// ============================================================================
+
+/**
+ * Parsed SSE event structure
+ */
+export interface ParsedSSEEvent {
+  event?: string;
+  data?: SSEEventData | { type: "done" } | { raw: string; error: string };
+  id?: string;
+  retry?: number;
+}
