@@ -1,10 +1,20 @@
 import Server from "@musistudio/llms";
 import { readConfigFile, writeConfigFile, backupConfigFile } from "./utils";
 import { checkForUpdates, performUpdate } from "./utils";
-import { join } from "path";
+import { join, resolve, normalize } from "path";
 import fastifyStatic from "@fastify/static";
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { homedir } from "os";
+
+/**
+ * Validate that a file path is within the allowed logs directory
+ * Prevents path traversal attacks
+ */
+function isPathWithinLogsDir(filePath: string, logDir: string): boolean {
+  const normalizedPath = normalize(resolve(filePath));
+  const normalizedLogDir = normalize(resolve(logDir));
+  return normalizedPath.startsWith(normalizedLogDir + "/") || normalizedPath === normalizedLogDir;
+}
 import { calculateTokenCount } from "./utils/router";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type {
@@ -193,15 +203,20 @@ export const createServer = (config: ServerConfig): Server => {
   // Get log content endpoint
   server.app.get("/api/logs", async (req: FastifyRequest<{ Querystring: LogsQueryParams }>, reply: FastifyReply) => {
     try {
+      const logDir = join(homedir(), ".claude-code-router", "logs");
       const filePath = req.query.file;
       let logFilePath: string;
 
       if (filePath) {
-        // If file path is specified, use the specified path
+        // Validate path is within logs directory to prevent path traversal
+        if (!isPathWithinLogsDir(filePath, logDir)) {
+          reply.status(403).send({ error: "Access denied: path outside logs directory" });
+          return;
+        }
         logFilePath = filePath;
       } else {
         // If no file path is specified, use the default log file path
-        logFilePath = join(homedir(), ".claude-code-router", "logs", "app.log");
+        logFilePath = join(logDir, "app.log");
       }
 
       if (!existsSync(logFilePath)) {
@@ -221,15 +236,20 @@ export const createServer = (config: ServerConfig): Server => {
   // Clear log content endpoint
   server.app.delete("/api/logs", async (req: FastifyRequest<{ Querystring: LogsQueryParams }>, reply: FastifyReply) => {
     try {
+      const logDir = join(homedir(), ".claude-code-router", "logs");
       const filePath = req.query.file;
       let logFilePath: string;
 
       if (filePath) {
-        // If file path is specified, use the specified path
+        // Validate path is within logs directory to prevent path traversal
+        if (!isPathWithinLogsDir(filePath, logDir)) {
+          reply.status(403).send({ error: "Access denied: path outside logs directory" });
+          return;
+        }
         logFilePath = filePath;
       } else {
         // If no file path is specified, use the default log file path
-        logFilePath = join(homedir(), ".claude-code-router", "logs", "app.log");
+        logFilePath = join(logDir, "app.log");
       }
 
       if (existsSync(logFilePath)) {

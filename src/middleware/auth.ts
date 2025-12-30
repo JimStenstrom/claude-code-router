@@ -1,7 +1,15 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 
+/**
+ * Auth middleware configuration
+ */
+interface AuthConfig {
+  APIKEY?: string;
+  PORT?: number;
+}
+
 export const apiKeyAuth =
-  (config: any) =>
+  (config: AuthConfig) =>
   async (req: FastifyRequest, reply: FastifyReply, done: () => void) => {
     // Public endpoints that don't require authentication
     if (["/", "/health"].includes(req.url) || req.url.startsWith("/ui")) {
@@ -10,17 +18,19 @@ export const apiKeyAuth =
 
     const apiKey = config.APIKEY;
     if (!apiKey) {
-      // If no API key is set, enable CORS for local
+      // If no API key is set, enable CORS for local origins only
+      const port = config.PORT || 3456;
       const allowedOrigins = [
-        `http://127.0.0.1:${config.PORT || 3456}`,
-        `http://localhost:${config.PORT || 3456}`,
+        `http://127.0.0.1:${port}`,
+        `http://localhost:${port}`,
       ];
-      if (req.headers.origin && !allowedOrigins.includes(req.headers.origin)) {
+      const origin = req.headers.origin;
+      if (origin && !allowedOrigins.includes(origin)) {
         reply.status(403).send("CORS not allowed for this origin");
         return;
-      } else {
-        reply.header('Access-Control-Allow-Origin', `http://127.0.0.1:${config.PORT || 3456}`);
-        reply.header('Access-Control-Allow-Origin', `http://localhost:${config.PORT || 3456}`);
+      } else if (origin && allowedOrigins.includes(origin)) {
+        // Set the matching origin (fixes duplicate header issue)
+        reply.header('Access-Control-Allow-Origin', origin);
       }
       return done();
     }

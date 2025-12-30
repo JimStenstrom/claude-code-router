@@ -45,10 +45,11 @@ export function isServiceRunning(): boolean {
 
     let pid: number;
     try {
-        const pidStr = readFileSync(PID_FILE, 'utf-8');
+        const pidStr = readFileSync(PID_FILE, 'utf-8').trim();
         pid = parseInt(pidStr, 10);
-        if (isNaN(pid)) {
-            // PID file content is invalid
+        // Validate PID is a positive integer within valid range (prevents command injection)
+        if (isNaN(pid) || pid <= 0 || pid > 4194304 || !/^\d+$/.test(pidStr)) {
+            // PID file content is invalid or potentially malicious
             cleanupPidFile();
             return false;
         }
@@ -62,6 +63,7 @@ export function isServiceRunning(): boolean {
             // --- Windows platform logic ---
             // Use tasklist command with PID filter to find the process
             // stdio: 'pipe' suppresses command output to prevent console display
+            // PID is validated above to be a safe integer value
             const command = `tasklist /FI "PID eq ${pid}"`;
             const output = execSync(command, { stdio: 'pipe' }).toString();
 

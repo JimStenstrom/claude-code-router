@@ -5,10 +5,11 @@ import {
   decrementReferenceCount,
   incrementReferenceCount,
 } from "./processCheck";
-import { quote } from 'shell-quote';
 import minimist from "minimist";
 import { createEnvVariables } from "./createEnvVariables";
 import type { SettingsFlag, EnvironmentVariables, AppConfig } from "../types";
+import { existsSync } from "fs";
+import { resolve } from "path";
 
 /**
  * Extended config interface with optional fields used in code command
@@ -62,28 +63,47 @@ export async function executeCodeCommand(args: string[] = []): Promise<void> {
   // Increment reference count when command starts
   incrementReferenceCount();
 
-  // Execute claude command
-  const claudePath = config?.CLAUDE_PATH || process.env.CLAUDE_PATH || "claude";
+  // Execute claude command - validate path to prevent command injection
+  let claudePath = config?.CLAUDE_PATH || process.env.CLAUDE_PATH || "claude";
 
-  const joinedArgs = args.length > 0 ? quote(args) : "";
+  // If a custom path is specified, validate it exists and is not a shell command
+  if (claudePath !== "claude") {
+    const resolvedPath = resolve(claudePath);
+    // Only allow paths that don't contain shell metacharacters
+    if (/[;&|`$(){}[\]<>!]/.test(claudePath)) {
+      console.error("Invalid CLAUDE_PATH: contains shell metacharacters");
+      decrementReferenceCount();
+      process.exit(1);
+    }
+    claudePath = resolvedPath;
+  }
 
   const stdioConfig: StdioOptions = config.NON_INTERACTIVE_MODE
     ? ["pipe", "inherit", "inherit"] // Pipe stdin for non-interactive
     : "inherit"; // Default inherited behavior
 
-  const argsObj = minimist(args)
-  const argsArr = []
-  for (const [argsObjKey, argsObjValue] of Object.entries(argsObj)) {
-    if (argsObjKey !== '_' && argsObj[argsObjKey]) {
-      const prefix = argsObjKey.length === 1 ? '-' : '--';
-      // For boolean flags, don't append the value
-      if (argsObjValue === true) {
-        argsArr.push(`${prefix}${argsObjKey}`);
+  // Build arguments array safely without shell interpretation
+  const argsObj = minimist(args);
+  const argsArr: string[] = [];
+
+  // Add positional arguments first
+  if (argsObj._ && argsObj._.length > 0) {
+    argsArr.push(...argsObj._.map(String));
+  }
+
+  // Add flag arguments
+  for (const [key, value] of Object.entries(argsObj)) {
+    if (key !== '_' && value !== undefined && value !== false) {
+      const prefix = key.length === 1 ? '-' : '--';
+      if (value === true) {
+        argsArr.push(`${prefix}${key}`);
       } else {
-        argsArr.push(`${prefix}${argsObjKey} ${JSON.stringify(argsObjValue)}`);
+        argsArr.push(`${prefix}${key}`, String(value));
       }
     }
   }
+
+  // Spawn without shell to prevent command injection
   const claudeProcess = spawn(
     claudePath,
     argsArr,
@@ -93,7 +113,7 @@ export async function executeCodeCommand(args: string[] = []): Promise<void> {
         ...env
       },
       stdio: stdioConfig,
-      shell: true,
+      // shell: false is the default, explicitly not using shell
     }
   );
 
