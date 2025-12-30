@@ -8,7 +8,6 @@ import {
 import minimist from "minimist";
 import { createEnvVariables } from "./createEnvVariables";
 import type { SettingsFlag, EnvironmentVariables, AppConfig } from "../types";
-import { existsSync } from "fs";
 import { resolve } from "path";
 
 /**

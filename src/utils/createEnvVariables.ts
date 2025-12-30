@@ -7,7 +7,8 @@ import { readConfigFile } from ".";
 export const createEnvVariables = async () => {
   const config = await readConfigFile();
   const port = config.PORT || 3456;
-  const apiKey = config.APIKEY || "test";
+  // Use configured API key or empty string (no insecure default)
+  const apiKey = config.APIKEY || "";
 
   return {
     ANTHROPIC_AUTH_TOKEN: apiKey,

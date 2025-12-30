@@ -9,9 +9,18 @@ import {
   PLUGINS_DIR,
 } from "../constants";
 import { cleanupLogFiles } from "./logCleanup";
+import type { AppConfig } from "../types";
 
-// Function to interpolate environment variables in config values
-const interpolateEnvVars = (obj: any): any => {
+/**
+ * JSON-compatible value types for config interpolation
+ */
+type ConfigValue = string | number | boolean | null | ConfigValue[] | { [key: string]: ConfigValue };
+
+/**
+ * Interpolate environment variables in config values
+ * Replaces $VAR_NAME or ${VAR_NAME} with environment variable values
+ */
+const interpolateEnvVars = (obj: ConfigValue): ConfigValue => {
   if (typeof obj === "string") {
     // Replace $VAR_NAME or ${VAR_NAME} with environment variable values
     return obj.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g, (match, braced, unbraced) => {
@@ -21,9 +30,9 @@ const interpolateEnvVars = (obj: any): any => {
   } else if (Array.isArray(obj)) {
     return obj.map(interpolateEnvVars);
   } else if (obj !== null && typeof obj === "object") {
-    const result: any = {};
+    const result: { [key: string]: ConfigValue } = {};
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = interpolateEnvVars(value);
+      result[key] = interpolateEnvVars(value as ConfigValue);
     }
     return result;
   }
@@ -161,7 +170,7 @@ export const backupConfigFile = async () => {
   return null;
 };
 
-export const writeConfigFile = async (config: any) => {
+export const writeConfigFile = async (config: Partial<AppConfig>) => {
   await ensureDir(HOME_DIR);
   const configWithComment = `${JSON.stringify(config, null, 2)}`;
   await fs.writeFile(CONFIG_FILE, configWithComment);
