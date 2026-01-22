@@ -86,7 +86,7 @@ const COLORS: Record<string, string> = {
   bg_bright_white: "\x1b[107m",
 };
 
-// Use TrueColor (24-bit color) to support hexadecimal colors
+// TrueColor (24-bit) support for hexadecimal colors
 const TRUE_COLOR_PREFIX = "\x1b[38;2;";
 const TRUE_COLOR_BG_PREFIX = "\x1b[48;2;";
 
@@ -94,25 +94,25 @@ const TRUE_COLOR_BG_PREFIX = "\x1b[48;2;";
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   // Remove # and whitespace
   hex = hex.replace(/^#/, '').trim();
-  
+
   // Handle shorthand format (#RGB -> #RRGGBB)
   if (hex.length === 3) {
     hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
   }
-  
+
   if (hex.length !== 6) {
     return null;
   }
-  
+
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
   const b = parseInt(hex.substring(4, 6), 16);
-  
+
   // Validate RGB values
   if (isNaN(r) || isNaN(g) || isNaN(b) || r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
     return null;
   }
-  
+
   return { r, g, b };
 }
 
@@ -125,13 +125,13 @@ function getColorCode(colorName: string): string {
       return `${TRUE_COLOR_PREFIX}${rgb.r};${rgb.g};${rgb.b}m`;
     }
   }
-  
+
   // Return empty string by default
   return "";
 }
 
 
-// Variable replacement function, supports {{var}} format variable substitution
+// Variable replacement function, supports {{var}} format
 function replaceVariables(text: string, variables: Record<string, string>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (_match, varName) => {
     return variables[varName] || "";
@@ -143,40 +143,40 @@ async function executeScript(scriptPath: string, variables: Record<string, strin
   try {
     // Check if file exists
     await fs.access(scriptPath);
-    
-    // Use require to dynamically load script module
+
+    // Dynamically load script module using require
     const scriptModule = require(scriptPath);
-    
-    // If the export is a function, call it with the variables
+
+    // If export is a function, call it with variables
     if (typeof scriptModule === 'function') {
       const result = scriptModule(variables);
-      // If the result is a Promise, wait for it to complete
+      // If result is a Promise, wait for it to complete
       if (result instanceof Promise) {
         return await result;
       }
       return result;
     }
-    
-    // If the export is a default function, call it
+
+    // If default export is a function, call it
     if (scriptModule.default && typeof scriptModule.default === 'function') {
       const result = scriptModule.default(variables);
-      // If the result is a Promise, wait for it to complete
+      // If result is a Promise, wait for it to complete
       if (result instanceof Promise) {
         return await result;
       }
       return result;
     }
-    
-    // If the export is a string, return it directly
+
+    // If export is a string, return it directly
     if (typeof scriptModule === 'string') {
       return scriptModule;
     }
-    
-    // If the export is a default string, return it
+
+    // If default export is a string, return it
     if (scriptModule.default && typeof scriptModule.default === 'string') {
       return scriptModule.default;
     }
-    
+
     // Return empty string by default
     return "";
   } catch (error) {
@@ -196,7 +196,7 @@ const DEFAULT_THEME: StatusLineThemeConfig = {
     },
     {
       type: "gitBranch",
-      icon: "", // nf-dev-git_branch
+      icon: "", // nf-dev-git_branch
       text: "{{gitBranch}}",
       color: "bright_magenta"
     },
@@ -233,7 +233,7 @@ const POWERLINE_THEME: StatusLineThemeConfig = {
     },
     {
       type: "gitBranch",
-      icon: "", // nf-dev-git_branch
+      icon: "", // nf-dev-git_branch
       text: "{{gitBranch}}",
       color: "white",
       background: "bg_bright_magenta"
@@ -298,7 +298,7 @@ const SIMPLE_THEME: StatusLineThemeConfig = {
   ]
 };
 
-// Format usage info, use 'k' unit if greater than 1000
+// Format usage info, use 'k' suffix if greater than 1000
 function formatUsage(input_tokens: number, output_tokens: number): string {
   if (input_tokens > 1000 || output_tokens > 1000) {
     const inputFormatted = input_tokens > 1000 ? `${(input_tokens / 1000).toFixed(1)}k` : `${input_tokens}`;
@@ -308,10 +308,10 @@ function formatUsage(input_tokens: number, output_tokens: number): string {
   return `${input_tokens} ${output_tokens}`;
 }
 
-// Read theme configuration from user home directory
+// Read theme configuration from user's home directory
 async function getProjectThemeConfig(): Promise<{ theme: StatusLineThemeConfig | null, style: string }> {
   try {
-    // Only use the fixed config file in home directory
+    // Only use the fixed config file from home directory
     const configPath = CONFIG_FILE;
 
     // Check if config file exists
@@ -320,16 +320,16 @@ async function getProjectThemeConfig(): Promise<{ theme: StatusLineThemeConfig |
     } catch {
       return { theme: null, style: 'default' };
     }
-    
+
     const configContent = await fs.readFile(configPath, "utf-8");
     const config = JSON5.parse(configContent);
-    
-    // Check if there is StatusLine configuration
+
+    // Check if StatusLine configuration exists
     if (config.StatusLine) {
-      // Get the current style, default to 'default'
+      // Get current style, defaults to 'default'
       const currentStyle = config.StatusLine.currentStyle || 'default';
 
-      // Check if there is a configuration for the corresponding style
+      // Check if there's a configuration for the corresponding style
       if (config.StatusLine[currentStyle] && config.StatusLine[currentStyle].modules) {
         return { theme: config.StatusLine[currentStyle], style: currentStyle };
       }
@@ -342,34 +342,34 @@ async function getProjectThemeConfig(): Promise<{ theme: StatusLineThemeConfig |
   return { theme: null, style: 'default' };
 }
 
-// Check if simple theme should be used (fallback approach)
+// Check if simple theme should be used (fallback solution)
 // When USE_SIMPLE_ICONS environment variable is set, or when detecting terminals that may not support Nerd Fonts
 function shouldUseSimpleTheme(): boolean {
   // Check environment variable
   if (process.env.USE_SIMPLE_ICONS === 'true') {
     return true;
   }
-  
+
   // Check terminal type (some common terminals that don't support complex icons)
   const term = process.env.TERM || '';
   const unsupportedTerms = ['dumb', 'unknown'];
   if (unsupportedTerms.includes(term)) {
     return true;
   }
-  
+
   // By default, assume terminal supports Nerd Fonts
   return false;
 }
 
 // Check if Nerd Fonts icons can be displayed correctly
-// By checking terminal font info or using heuristic methods
+// Uses terminal font info or heuristic methods
 function canDisplayNerdFonts(): boolean {
-  // If environment variable explicitly specifies to use simple icons, cannot display Nerd Fonts
+  // If environment variable explicitly specifies simple icons, cannot display Nerd Fonts
   if (process.env.USE_SIMPLE_ICONS === 'true') {
     return false;
   }
-  
-  // Check some common terminal environment variables that support Nerd Fonts
+
+  // Check some common environment variables for terminals that support Nerd Fonts
   const fontEnvVars = ['NERD_FONT', 'NERDFONT', 'FONT'];
   for (const envVar of fontEnvVars) {
     const value = process.env[envVar];
@@ -377,7 +377,7 @@ function canDisplayNerdFonts(): boolean {
       return true;
     }
   }
-  
+
   // Check terminal type
   const termProgram = process.env.TERM_PROGRAM || '';
   const supportedTerminals = ['iTerm.app', 'vscode', 'Hyper', 'kitty', 'alacritty'];
@@ -390,23 +390,23 @@ function canDisplayNerdFonts(): boolean {
   if (colorTerm.includes('truecolor') || colorTerm.includes('24bit')) {
     return true;
   }
-  
-  // By default, assume Nerd Fonts can be displayed (but allow user to override via environment variable)
+
+  // By default, assume Nerd Fonts can be displayed (but allow user override via environment variable)
   return process.env.USE_SIMPLE_ICONS !== 'true';
 }
 
-// Check if a specific Unicode character can be displayed correctly
+// Check if specific Unicode character can be displayed correctly
 // This is a simple heuristic check
 function canDisplayUnicodeCharacter(char: string): boolean {
-  // For Nerd Fonts icons, we assume terminals that support UTF-8 can display them
-  // But it's actually hard to detect accurately, so we rely on environment variables and terminal type detection
+  // For Nerd Fonts icons, we assume UTF-8 supporting terminals can display them
+  // But it's actually difficult to detect accurately, so we rely on environment variables and terminal type detection
   try {
     // Check if terminal supports UTF-8
     const lang = process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || '';
     if (lang.includes('UTF-8') || lang.includes('utf8') || lang.includes('UTF8')) {
       return true;
     }
-    
+
     // Check LC_* environment variables
     const lcVars = ['LC_ALL', 'LC_CTYPE', 'LANG'];
     for (const lcVar of lcVars) {
@@ -419,7 +419,7 @@ function canDisplayUnicodeCharacter(char: string): boolean {
     // If check fails, return true by default
     return true;
   }
-  
+
   // By default, assume it can be displayed
   return true;
 }
@@ -428,17 +428,17 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
   try {
     // Check if simple theme should be used
     const useSimpleTheme = shouldUseSimpleTheme();
-    
+
     // Check if Nerd Fonts icons can be displayed
     const canDisplayNerd = canDisplayNerdFonts();
-    
-    // Determine the theme to use: use simple theme if user forces it or Nerd Fonts cannot be displayed
+
+    // Determine theme to use: if user forces simple theme or cannot display Nerd Fonts, use simple theme
     const effectiveTheme = useSimpleTheme || !canDisplayNerd ? SIMPLE_THEME : DEFAULT_THEME;
-    
-    // Get theme config from home directory, use determined default config if not found
+
+    // Get home directory theme config, use determined default if none exists
     const { theme: projectTheme, style: currentStyle } = await getProjectThemeConfig();
     const theme = projectTheme || effectiveTheme;
-    
+
     // Get current working directory and Git branch
     const workDir = input.workspace.current_dir;
     let gitBranch = "";
@@ -452,24 +452,24 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
         .toString()
         .trim();
     } catch (error) {
-      // If not a Git repository or fetching fails, ignore the error
+      // If not a Git repository or fetch fails, ignore error
     }
 
-    // Read the last assistant message from the transcript_path file
+    // Read last assistant message from transcript_path file
     const transcriptContent = await fs.readFile(input.transcript_path, "utf-8");
     const lines = transcriptContent.trim().split("\n");
-    
-    // Traverse in reverse to find the last assistant message
+
+    // Iterate backwards to find last assistant message
     let model = "";
     let inputTokens = 0;
     let outputTokens = 0;
-    
+
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const message: AssistantMessage = JSON.parse(lines[i]);
         if (message.type === "assistant" && message.message.model) {
           model = message.message.model;
-          
+
           if (message.message.usage) {
             inputTokens = message.message.usage.input_tokens;
             outputTokens = message.message.usage.output_tokens;
@@ -477,30 +477,30 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
           break;
         }
       } catch (parseError) {
-        // Ignore parsing errors, continue searching
+        // Ignore parse errors, continue searching
         continue;
       }
     }
-    
-    // If model name wasn't obtained from transcript, try getting it from config file
+
+    // If model name not obtained from transcript, try to get from config file
     if (!model) {
       try {
         // Get project config file path
         const projectConfigPath = path.join(workDir, ".claude-code-router", "config.json");
         let configPath = projectConfigPath;
 
-        // Check if project config file exists, if not use home directory config file
+        // Check if project config file exists, use home directory config if not
         try {
           await fs.access(projectConfigPath);
         } catch {
           configPath = CONFIG_FILE;
         }
-        
+
         // Read config file
         const configContent = await fs.readFile(configPath, "utf-8");
         const config = JSON5.parse(configContent);
-        
-        // Get model name from the Router field's default content
+
+        // Get model name from Router.default field
         if (config.Router && config.Router.default) {
           const [, defaultModel] = config.Router.default.split(",");
           if (defaultModel) {
@@ -508,23 +508,23 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
           }
         }
       } catch (configError) {
-        // If config file reading fails, ignore the error
+        // If config file read fails, ignore error
       }
     }
-    
-    // If model name still not obtained, use the display_name from the model field in the input JSON
+
+    // If still no model name, use display_name from input JSON model field
     if (!model) {
       model = input.model.display_name;
     }
-    
+
     // Get working directory name
     const workDirName = workDir.split("/").pop() || "";
-    
-    // Format usage information
+
+    // Format usage info
     const usage = formatUsage(inputTokens, outputTokens);
     const [formattedInputTokens, formattedOutputTokens] = usage.split(" ");
-    
-    // Define variable substitution mapping
+
+    // Define variable replacement mapping
     const variables = {
       workDirName,
       gitBranch,
@@ -532,10 +532,10 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
       inputTokens: formattedInputTokens,
       outputTokens: formattedOutputTokens
     };
-    
-    // Determine the style to use
+
+    // Determine style to use
     const isPowerline = currentStyle === 'powerline';
-    
+
     // Render status line based on style
     if (isPowerline) {
       return await renderPowerlineStyle(theme, variables);
@@ -543,15 +543,15 @@ export async function parseStatusLineData(input: StatusLineInput): Promise<strin
       return await renderDefaultStyle(theme, variables);
     }
   } catch (error) {
-    // Return empty string when error occurs
+    // Return empty string on error
     return "";
   }
 }
 
-// Read theme configuration from user home directory (specified style)
+// Read theme configuration from home directory (for specific style)
 async function getProjectThemeConfigForStyle(style: string): Promise<StatusLineThemeConfig | null> {
   try {
-    // Only use the fixed config file in home directory
+    // Only use the fixed config file from home directory
     const configPath = CONFIG_FILE;
 
     // Check if config file exists
@@ -560,11 +560,11 @@ async function getProjectThemeConfigForStyle(style: string): Promise<StatusLineT
     } catch {
       return null;
     }
-    
+
     const configContent = await fs.readFile(configPath, "utf-8");
     const config = JSON5.parse(configContent);
-    
-    // Check if there is StatusLine configuration
+
+    // Check if StatusLine configuration exists
     if (config.StatusLine && config.StatusLine[style] && config.StatusLine[style].modules) {
       return config.StatusLine[style];
     }
@@ -572,7 +572,7 @@ async function getProjectThemeConfigForStyle(style: string): Promise<StatusLineT
     // If reading fails, return null
     // console.error("Failed to read theme config:", error);
   }
-  
+
   return null;
 }
 
@@ -583,7 +583,7 @@ async function renderDefaultStyle(
 ): Promise<string> {
   const modules = theme.modules || DEFAULT_THEME.modules;
   const parts: string[] = [];
-  
+
   // Iterate through module array, render each module
   for (let i = 0; i < Math.min(modules.length, 5); i++) {
     const module = modules[i];
@@ -591,43 +591,43 @@ async function renderDefaultStyle(
     const background = module.background ? getColorCode(module.background) : "";
     const icon = module.icon || "";
 
-    // If it's a script type, execute the script to get the text
+    // If script type, execute script to get text
     let text = "";
     if (module.type === "script" && module.scriptPath) {
       text = await executeScript(module.scriptPath, variables);
     } else {
       text = replaceVariables(module.text, variables);
     }
-    
+
     // Build display text
     let displayText = "";
     if (icon) {
       displayText += `${icon} `;
     }
     displayText += text;
-    
-    // If displayText is empty, or has only icon without actual text, skip this module
+
+    // Skip module if displayText is empty or has only icon without actual text
     if (!displayText || !text) {
       continue;
     }
-    
+
     // Build module string
     let part = `${background}${color}`;
     part += `${displayText}${COLORS.reset}`;
-    
+
     parts.push(part);
   }
-  
+
   // Join all parts with spaces
   return parts.join(" ");
 }
 
-// Powerline symbols
-const SEP_RIGHT = "\uE0B0"; // 
+// Powerline symbol
+const SEP_RIGHT = "\uE0B0"; //
 
-// Color codes (256 color table)
+// Color number mapping (256-color table)
 const COLOR_MAP: Record<string, number> = {
-  // Basic colors mapped to 256 colors
+  // Basic colors mapped to 256-color
   black: 0,
   red: 1,
   green: 2,
@@ -644,7 +644,7 @@ const COLOR_MAP: Record<string, number> = {
   bright_magenta: 13,
   bright_cyan: 14,
   bright_white: 15,
-  // Bright background color mapping
+  // Bright background colors mapping
   bg_black: 0,
   bg_red: 1,
   bg_green: 2,
@@ -673,25 +673,25 @@ function getTrueColorRgb(colorName: string): { r: number; g: number; b: number }
     const color256 = COLOR_MAP[colorName];
     return color256ToRgb(color256);
   }
-  
+
   // Handle hexadecimal color
   if (colorName.startsWith('#') || /^[0-9a-fA-F]{6}$/.test(colorName) || /^[0-9a-fA-F]{3}$/.test(colorName)) {
     return hexToRgb(colorName);
   }
-  
-  // Handle background color hexadecimal
+
+  // Handle background hexadecimal color
   if (colorName.startsWith('bg_#')) {
     return hexToRgb(colorName.substring(3));
   }
-  
+
   return null;
 }
 
-// Convert 256 color table index to RGB values
+// Convert 256-color table index to RGB values
 function color256ToRgb(index: number): { r: number; g: number; b: number } | null {
   if (index < 0 || index > 255) return null;
 
-  // ANSI 256 color table conversion
+  // ANSI 256-color table conversion
   if (index < 16) {
     // Basic colors
     const basicColors = [
@@ -716,7 +716,7 @@ function color256ToRgb(index: number): { r: number; g: number; b: number } | nul
   }
 }
 
-// Generate a seamlessly joined segment: text displayed on bgN, separator transitions from bgN to nextBgN
+// Generate a seamless segment: text displayed on bgN, separator transitions from bgN to nextBgN
 function segment(text: string, textFg: string, bgColor: string, nextBgColor: string | null): string {
   const bgRgb = getTrueColorRgb(bgColor);
   if (!bgRgb) {
@@ -727,19 +727,19 @@ function segment(text: string, textFg: string, bgColor: string, nextBgColor: str
     const body = `${curBg}${fgColor} ${text} \x1b[0m`;
     return body;
   }
-  
+
   const curBg = `\x1b[48;2;${bgRgb.r};${bgRgb.g};${bgRgb.b}m`;
-  
+
   // Get foreground color RGB
-  let fgRgb = { r: 255, g: 255, b: 255 }; // Default foreground color is white
+  let fgRgb = { r: 255, g: 255, b: 255 }; // Default foreground is white
   const textFgRgb = getTrueColorRgb(textFg);
   if (textFgRgb) {
     fgRgb = textFgRgb;
   }
-  
+
   const fgColor = `\x1b[38;2;${fgRgb.r};${fgRgb.g};${fgRgb.b}m`;
   const body = `${curBg}${fgColor} ${text} \x1b[0m`;
-  
+
   if (nextBgColor != null) {
     const nextBgRgb = getTrueColorRgb(nextBgColor);
     if (nextBgRgb) {
@@ -755,7 +755,7 @@ function segment(text: string, textFg: string, bgColor: string, nextBgColor: str
     const sep = `${sepCurFg}${sepNextBg}${SEP_RIGHT}\x1b[0m`;
     return body + sep;
   }
-  
+
   return body;
 }
 
@@ -766,7 +766,7 @@ async function renderPowerlineStyle(
 ): Promise<string> {
   const modules = theme.modules || POWERLINE_THEME.modules;
   const segments: string[] = [];
-  
+
   // Iterate through module array, render each module
   for (let i = 0; i < Math.min(modules.length, 5); i++) {
     const module = modules[i];
@@ -774,40 +774,40 @@ async function renderPowerlineStyle(
     const backgroundName = module.background || "";
     const icon = module.icon || "";
 
-    // If it's a script type, execute the script to get the text
+    // If script type, execute script to get text
     let text = "";
     if (module.type === "script" && module.scriptPath) {
       text = await executeScript(module.scriptPath, variables);
     } else {
       text = replaceVariables(module.text, variables);
     }
-    
+
     // Build display text
     let displayText = "";
     if (icon) {
       displayText += `${icon} `;
     }
     displayText += text;
-    
-    // If displayText is empty, or has only icon without actual text, skip this module
+
+    // Skip module if displayText is empty or has only icon without actual text
     if (!displayText || !text) {
       continue;
     }
-    
+
     // Get next module's background color (for separator)
     let nextBackground: string | null = null;
     if (i < modules.length - 1) {
       const nextModule = modules[i + 1];
       nextBackground = nextModule.background || null;
     }
-    
+
     // Use module-defined background color, or provide default for Powerline style
     const actualBackground = backgroundName || "bg_bright_blue";
-    
+
     // Generate segment, supports hexadecimal colors
     const segmentStr = segment(displayText, color, actualBackground, nextBackground);
     segments.push(segmentStr);
   }
-  
+
   return segments.join("");
 }

@@ -14,6 +14,14 @@ export const REFERENCE_COUNT_FILE = path.join(os.tmpdir(), "claude-code-referenc
 // Claude projects directory
 export const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 
+// Router thresholds and limits
+export const DEFAULT_LONG_CONTEXT_THRESHOLD = 60000;
+export const DEFAULT_PORT = 3456;
+export const MAX_PID_VALUE = 4194304;
+
+// Timeouts (in milliseconds)
+export const INTERNAL_FETCH_TIMEOUT_MS = 30000;
+export const DEFAULT_API_TIMEOUT_MS = 600000;
 
 export const DEFAULT_CONFIG = {
   LOG: false,

@@ -1,5 +1,4 @@
 import {
-  MessageCreateParamsBase,
   MessageParam,
   Tool,
 } from "@anthropic-ai/sdk/resources/messages";
@@ -8,8 +7,19 @@ import { sessionUsageCache, Usage } from "./cache";
 import { readFile, access } from "fs/promises";
 import { opendir, stat } from "fs/promises";
 import { join } from "path";
-import { CLAUDE_PROJECTS_DIR, HOME_DIR } from "../constants";
+import { CLAUDE_PROJECTS_DIR, HOME_DIR, DEFAULT_LONG_CONTEXT_THRESHOLD } from "../constants";
 import { LRUCache } from "lru-cache";
+import type {
+  AppConfig,
+  RouterConfig,
+  Provider,
+  RouterRequest,
+  RouterContext,
+  SystemPrompt,
+  SystemTextBlock,
+  MessageContentBlock,
+  WebSearchTool,
+} from "../types";
 
 const enc = get_encoding("cl100k_base");
 
@@ -24,7 +34,7 @@ const enc = get_encoding("cl100k_base");
  */
 export const calculateTokenCount = (
   messages: MessageParam[],
-  system: any,
+  system: SystemPrompt | undefined,
   tools: Tool[]
 ): number => {
   let tokenCount = 0;
@@ -33,12 +43,12 @@ export const calculateTokenCount = (
       if (typeof message.content === "string") {
         tokenCount += enc.encode(message.content).length;
       } else if (Array.isArray(message.content)) {
-        message.content.forEach((contentPart: any) => {
-          if (contentPart.type === "text") {
+        message.content.forEach((contentPart) => {
+          if (contentPart.type === "text" && "text" in contentPart) {
             tokenCount += enc.encode(contentPart.text).length;
-          } else if (contentPart.type === "tool_use") {
+          } else if (contentPart.type === "tool_use" && "input" in contentPart) {
             tokenCount += enc.encode(JSON.stringify(contentPart.input)).length;
-          } else if (contentPart.type === "tool_result") {
+          } else if (contentPart.type === "tool_result" && "content" in contentPart) {
             tokenCount += enc.encode(
               typeof contentPart.content === "string"
                 ? contentPart.content
@@ -52,12 +62,13 @@ export const calculateTokenCount = (
   if (typeof system === "string") {
     tokenCount += enc.encode(system).length;
   } else if (Array.isArray(system)) {
-    system.forEach((item: any) => {
+    system.forEach((item) => {
       if (item.type !== "text") return;
-      if (typeof item.text === "string") {
-        tokenCount += enc.encode(item.text).length;
-      } else if (Array.isArray(item.text)) {
-        item.text.forEach((textPart: any) => {
+      const textItem = item as SystemTextBlock;
+      if (typeof textItem.text === "string") {
+        tokenCount += enc.encode(textItem.text).length;
+      } else if (Array.isArray(textItem.text)) {
+        textItem.text.forEach((textPart: string) => {
           tokenCount += enc.encode(textPart || "").length;
         });
       }
@@ -81,11 +92,11 @@ export const calculateTokenCount = (
  * @param filePath - Path to the configuration file
  * @returns Parsed configuration object, or null if file doesn't exist or parsing fails
  */
-const readConfigFile = async (filePath: string): Promise<any | null> => {
+const readConfigFile = async (filePath: string): Promise<Partial<AppConfig> | null> => {
   try {
     await access(filePath);
     const content = await readFile(filePath, "utf8");
-    return JSON.parse(content);
+    return JSON.parse(content) as Partial<AppConfig>;
   } catch (error) {
     return null; // Return null if file doesn't exist or read fails
   }
@@ -98,7 +109,7 @@ const readConfigFile = async (filePath: string): Promise<any | null> => {
  * @param req - Request object containing sessionId
  * @returns Project-specific router config, or undefined to use global config
  */
-const getProjectSpecificRouter = async (req: any): Promise<any | undefined> => {
+const getProjectSpecificRouter = async (req: RouterRequest): Promise<RouterConfig | undefined> => {
   // Check if there is a project-specific configuration
   if (req.sessionId) {
     const project = await searchProjectBySession(req.sessionId);
@@ -143,9 +154,9 @@ const getProjectSpecificRouter = async (req: any): Promise<any | undefined> => {
  * @returns Model identifier in "provider,model" format
  */
 const getUseModel = async (
-  req: any,
+  req: RouterRequest,
   tokenCount: number,
-  config: any,
+  config: AppConfig,
   lastUsage?: Usage | undefined
 ): Promise<string> => {
   const projectSpecificRouter = await getProjectSpecificRouter(req);
@@ -154,10 +165,10 @@ const getUseModel = async (
   if (req.body.model.includes(",")) {
     const [provider, model] = req.body.model.split(",");
     const finalProvider = config.Providers.find(
-      (p: any) => p.name.toLowerCase() === provider
+      (p: Provider) => p.name.toLowerCase() === provider
     );
     const finalModel = finalProvider?.models?.find(
-      (m: any) => m.toLowerCase() === model
+      (m: string) => m.toLowerCase() === model
     );
     if (finalProvider && finalModel) {
       return `${finalProvider.name},${finalModel}`;
@@ -166,7 +177,7 @@ const getUseModel = async (
   }
 
   // if tokenCount is greater than the configured threshold, use the long context model
-  const longContextThreshold = Router.longContextThreshold || 60000;
+  const longContextThreshold = Router.longContextThreshold || DEFAULT_LONG_CONTEXT_THRESHOLD;
   const lastUsageThreshold =
     lastUsage &&
     lastUsage.input_tokens > longContextThreshold &&
@@ -178,21 +189,29 @@ const getUseModel = async (
     );
     return Router.longContext;
   }
+
+  // Check for CCR-SUBAGENT-MODEL in system prompt
+  const systemPrompt = req.body.system;
   if (
-    req.body?.system?.length > 1 &&
-    req.body?.system[1]?.text?.startsWith("<CCR-SUBAGENT-MODEL>")
+    Array.isArray(systemPrompt) &&
+    systemPrompt.length > 1 &&
+    systemPrompt[1]?.type === "text"
   ) {
-    const model = req.body?.system[1].text.match(
-      /<CCR-SUBAGENT-MODEL>(.*?)<\/CCR-SUBAGENT-MODEL>/s
-    );
-    if (model) {
-      req.body.system[1].text = req.body.system[1].text.replace(
-        `<CCR-SUBAGENT-MODEL>${model[1]}</CCR-SUBAGENT-MODEL>`,
-        ""
+    const systemBlock = systemPrompt[1] as SystemTextBlock;
+    if (typeof systemBlock.text === "string" && systemBlock.text.startsWith("<CCR-SUBAGENT-MODEL>")) {
+      const modelMatch = systemBlock.text.match(
+        /<CCR-SUBAGENT-MODEL>(.*?)<\/CCR-SUBAGENT-MODEL>/s
       );
-      return model[1];
+      if (modelMatch) {
+        systemBlock.text = systemBlock.text.replace(
+          `<CCR-SUBAGENT-MODEL>${modelMatch[1]}</CCR-SUBAGENT-MODEL>`,
+          ""
+        );
+        return modelMatch[1];
+      }
     }
   }
+
   // Use the background model for any Claude Haiku variant
   if (
     req.body.model?.includes("claude") &&
@@ -202,20 +221,25 @@ const getUseModel = async (
     req.log.info(`Using background model for ${req.body.model}`);
     return config.Router.background;
   }
+
   // The priority of websearch must be higher than thinking.
   if (
     Array.isArray(req.body.tools) &&
-    req.body.tools.some((tool: any) => tool.type?.startsWith("web_search")) &&
+    req.body.tools.some((tool) => {
+      const webSearchTool = tool as WebSearchTool;
+      return webSearchTool.type?.startsWith("web_search");
+    }) &&
     Router.webSearch
   ) {
     return Router.webSearch;
   }
+
   // If thinking is enabled, use the think model
   if (req.body.thinking && Router.think) {
-    req.log.info(`Using think model for ${req.body.thinking}`);
+    req.log.info(`Using think model for ${JSON.stringify(req.body.thinking)}`);
     return Router.think;
   }
-  return Router!.default;
+  return Router.default;
 };
 
 /**
@@ -232,7 +256,11 @@ const getUseModel = async (
  * @param _res - Fastify reply object (unused)
  * @param context - Context containing config and event emitter
  */
-export const router = async (req: any, _res: any, context: any): Promise<void> => {
+export const router = async (
+  req: RouterRequest,
+  _res: unknown,
+  context: RouterContext
+): Promise<void> => {
   const { config, event } = context;
   // Parse sessionId from metadata.user_id
   if (req.body.metadata?.user_id) {
@@ -241,25 +269,30 @@ export const router = async (req: any, _res: any, context: any): Promise<void> =
       req.sessionId = parts[1];
     }
   }
-  const lastMessageUsage = sessionUsageCache.get(req.sessionId);
-  const { messages, system = [], tools }: MessageCreateParamsBase = req.body;
+  const lastMessageUsage = req.sessionId ? sessionUsageCache.get(req.sessionId) : undefined;
+  const { messages, system = [], tools } = req.body;
+
+  // Rewrite system prompt if configured
   if (
     config.REWRITE_SYSTEM_PROMPT &&
-    system.length > 1 &&
-    system[1]?.text?.includes("<env>")
+    Array.isArray(system) &&
+    system.length > 1
   ) {
-    const prompt = await readFile(config.REWRITE_SYSTEM_PROMPT, "utf-8");
-    system[1].text = `${prompt}<env>${system[1].text.split("<env>").pop()}`;
+    const systemBlock = system[1] as SystemTextBlock;
+    if (typeof systemBlock?.text === "string" && systemBlock.text.includes("<env>")) {
+      const prompt = await readFile(config.REWRITE_SYSTEM_PROMPT, "utf-8");
+      systemBlock.text = `${prompt}<env>${systemBlock.text.split("<env>").pop()}`;
+    }
   }
 
   try {
     const tokenCount = calculateTokenCount(
       messages as MessageParam[],
-      system,
+      system as SystemPrompt,
       tools as Tool[]
     );
 
-    let model;
+    let model: string | undefined;
     if (config.CUSTOM_ROUTER_PATH) {
       try {
         const customRouter = require(config.CUSTOM_ROUTER_PATH);
@@ -267,27 +300,32 @@ export const router = async (req: any, _res: any, context: any): Promise<void> =
         model = await customRouter(req, config, {
           event,
         });
-      } catch (e: any) {
-        req.log.error(`failed to load custom router: ${e.message}`);
+      } catch (e: unknown) {
+        const error = e as Error;
+        req.log.error(`failed to load custom router: ${error.message}`);
       }
     }
     if (!model) {
       model = await getUseModel(req, tokenCount, config, lastMessageUsage);
     }
     req.body.model = model;
-  } catch (error: any) {
-    req.log.error(`Error in router middleware: ${error.message}`);
-    req.body.model = config.Router!.default;
+  } catch (error: unknown) {
+    const err = error as Error;
+    req.log.error(`Error in router middleware: ${err.message}`);
+    req.body.model = config.Router.default;
   }
   return;
 };
 
 // In-memory cache storing sessionId to project name mapping
-// A null value indicates a previous lookup that found no project
+// An empty string value indicates a previous lookup that found no project
 // Uses LRU cache with a maximum of 1000 entries
-const sessionProjectCache = new LRUCache<string, string | null>({
+const sessionProjectCache = new LRUCache<string, string>({
   max: 1000,
 });
+
+// Sentinel value to indicate "not found" in cache
+const NOT_FOUND_SENTINEL = "";
 
 /**
  * Search for a project by session ID
@@ -304,7 +342,9 @@ export const searchProjectBySession = async (
 ): Promise<string | null> => {
   // First check the cache
   if (sessionProjectCache.has(sessionId)) {
-    return sessionProjectCache.get(sessionId)!;
+    const cached = sessionProjectCache.get(sessionId);
+    // Empty string is our sentinel for "not found"
+    return cached === NOT_FOUND_SENTINEL ? null : cached ?? null;
   }
 
   try {
@@ -345,13 +385,13 @@ export const searchProjectBySession = async (
       }
     }
 
-    // Cache the not-found result (null indicates a previous lookup found no project)
-    sessionProjectCache.set(sessionId, null);
+    // Cache the not-found result (empty string indicates a previous lookup found no project)
+    sessionProjectCache.set(sessionId, NOT_FOUND_SENTINEL);
     return null; // No matching project found
   } catch (error) {
     console.error("Error searching for project by session:", error);
-    // Also cache null result on error to avoid repeated failures
-    sessionProjectCache.set(sessionId, null);
+    // Also cache sentinel result on error to avoid repeated failures
+    sessionProjectCache.set(sessionId, NOT_FOUND_SENTINEL);
     return null;
   }
 };

@@ -1,19 +1,23 @@
 import { imageAgent } from './image.agent'
-import { IAgent } from './type';
+import { IAgent, ITool } from './type';
 
+/**
+ * Manager class for handling multiple agents and their tools
+ */
 export class AgentsManager {
     private agents: Map<string, IAgent> = new Map();
 
     /**
      * Register an agent
-     * @param agent - The agent instance to register
+     * @param agent The agent instance to register
      */
     registerAgent(agent: IAgent): void {
         this.agents.set(agent.name, agent);
     }
+
     /**
      * Find an agent by name
-     * @param name - The agent name
+     * @param name Agent name
      * @returns The found agent instance, or undefined if not found
      */
     getAgent(name: string): IAgent | undefined {
@@ -28,13 +32,12 @@ export class AgentsManager {
         return Array.from(this.agents.values());
     }
 
-
     /**
      * Get all tools from all agents
      * @returns Array of tools
      */
-    getAllTools(): any[] {
-        const allTools: any[] = [];
+    getAllTools(): ITool[] {
+        const allTools: ITool[] = [];
         for (const agent of this.agents.values()) {
             allTools.push(...agent.tools.values());
         }
