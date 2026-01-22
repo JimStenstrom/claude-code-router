@@ -2,7 +2,7 @@ import { existsSync } from "fs";
 import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { randomBytes } from "crypto";
-import path, { join } from "path";
+import { join } from "path";
 import { initConfig, initDir, cleanupLogFiles } from "./utils";
 import { createServer } from "./server";
 import { router } from "./utils/router";
@@ -12,14 +12,14 @@ import {
   isServiceRunning,
   savePid,
 } from "./utils/processCheck";
-import { CONFIG_FILE, HOME_DIR, INTERNAL_FETCH_TIMEOUT_MS, DEFAULT_PORT } from "./constants";
+import { CONFIG_FILE, HOME_DIR } from "./constants";
 import { createStream, type Generator } from 'rotating-file-stream';
 import { sessionUsageCache } from "./utils/cache";
-import { SSEParserTransform } from "./utils/SSEParser.transform";
-import { SSESerializerTransform } from "./utils/SSESerializer.transform";
-import { rewriteStream } from "./utils/rewriteStream";
-import JSON5 from "json5";
-import { IAgent } from "./agents/type";
+import {
+  processAgentStream,
+  trackStreamUsage,
+  shouldProcessRequest,
+} from "./utils/onSendHandler";
 import agentsManager from "./agents";
 import { EventEmitter } from "node:events";
 import type { FastifyRequest, FastifyReply } from "fastify";
@@ -27,11 +27,7 @@ import type { Tool } from "@anthropic-ai/sdk/resources/messages";
 import type {
   AppConfig,
   RouterRequest,
-  SSEEvent,
-  ToolUseMessage,
-  ToolResultMessage,
   StreamPayloadWithUsage,
-  NodeError,
   OnSendDoneCallback,
 } from "./types";
 
@@ -218,212 +214,48 @@ async function run(options: RunOptions = {}) {
     done: OnSendDoneCallback
   ) => {
     const routerReq = req as unknown as RouterRequest;
-    if (routerReq.sessionId && req.url.startsWith("/v1/messages") && !req.url.startsWith("/v1/messages/count_tokens")) {
-      if (payload instanceof ReadableStream) {
-        if (routerReq.agents) {
-          const abortController = new AbortController();
-          const eventStream = payload.pipeThrough(new SSEParserTransform());
-          let currentAgent: undefined | IAgent;
-          let currentToolIndex = -1;
-          let currentToolName = '';
-          let currentToolArgs = '';
-          let currentToolId = '';
-          const toolMessages: ToolResultMessage[] = [];
-          const assistantMessages: ToolUseMessage[] = [];
 
-          // Process SSE stream and handle agent tool calls
-          return done(null, rewriteStream(eventStream, async (data: SSEEvent, controller: ReadableStreamDefaultController) => {
-            try {
-              // Detect tool call start
-              if (data.event === 'content_block_start' && data?.data?.content_block?.name) {
-                const agent = routerReq.agents!.find((name: string) => agentsManager.getAgent(name)?.tools.get(data.data.content_block!.name!));
-                if (agent) {
-                  currentAgent = agentsManager.getAgent(agent);
-                  currentToolIndex = data.data.index!;
-                  currentToolName = data.data.content_block.name;
-                  currentToolId = data.data.content_block.id!;
-                  return undefined;
-                }
-              }
-
-              // Collect tool arguments
-              if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data?.delta?.type === 'input_json_delta') {
-                currentToolArgs += data.data?.delta?.partial_json || '';
-                return undefined;
-              }
-
-              // Tool call completed - process agent invocation
-              if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data.type === 'content_block_stop') {
-                try {
-                  const args = JSON5.parse(currentToolArgs) as Record<string, unknown>;
-                  assistantMessages.push({
-                    type: "tool_use",
-                    id: currentToolId,
-                    name: currentToolName,
-                    input: args
-                  });
-                  const toolResult = await currentAgent?.tools.get(currentToolName)?.handler(args, {
-                    req: routerReq,
-                    config: config as AppConfig
-                  });
-                  toolMessages.push({
-                    tool_use_id: currentToolId,
-                    type: "tool_result",
-                    content: toolResult
-                  });
-                  currentAgent = undefined;
-                  currentToolIndex = -1;
-                  currentToolName = '';
-                  currentToolArgs = '';
-                  currentToolId = '';
-                } catch (e) {
-                  // Log error with context for debugging
-                  console.error('Error executing agent tool:', currentToolName, e);
-                  // Reset state to allow processing to continue
-                  currentAgent = undefined;
-                  currentToolIndex = -1;
-                  currentToolName = '';
-                  currentToolArgs = '';
-                  currentToolId = '';
-                }
-                return undefined;
-              }
-
-              if (data.event === 'message_delta' && toolMessages.length) {
-                routerReq.body.messages.push({
-                  role: 'assistant',
-                  content: assistantMessages
-                });
-                routerReq.body.messages.push({
-                  role: 'user',
-                  content: toolMessages
-                });
-
-                // Create abort controller for timeout
-                const fetchController = new AbortController();
-                const timeoutId = setTimeout(() => fetchController.abort(), INTERNAL_FETCH_TIMEOUT_MS);
-
-                try {
-                  const response = await fetch(`http://127.0.0.1:${config.PORT || DEFAULT_PORT}/v1/messages`, {
-                    method: "POST",
-                    headers: {
-                      'x-api-key': config.APIKEY || '',
-                      'content-type': 'application/json',
-                    },
-                    body: JSON.stringify(routerReq.body),
-                    signal: fetchController.signal,
-                  });
-                  clearTimeout(timeoutId);
-
-                  if (!response.ok) {
-                    console.error('Internal fetch failed with status:', response.status);
-                    return undefined;
-                  }
-
-                  const stream = response.body!.pipeThrough(new SSEParserTransform());
-                  const reader = stream.getReader();
-                  while (true) {
-                    try {
-                      const { value, done: streamDone } = await reader.read();
-                      if (streamDone) {
-                        break;
-                      }
-                      if (value.event && ['message_start', 'message_stop'].includes(value.event)) {
-                        continue;
-                      }
-
-                      // Check if stream is still writable
-                      if (!controller.desiredSize) {
-                        break;
-                      }
-
-                      controller.enqueue(value);
-                    } catch (readError: unknown) {
-                      const nodeError = readError as NodeError;
-                      if (nodeError.name === 'AbortError' || nodeError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                        abortController.abort(); // Abort all related operations
-                        break;
-                      }
-                      throw readError;
-                    }
-                  }
-                } catch (fetchError: unknown) {
-                  const nodeError = fetchError as NodeError;
-                  if (nodeError.name === 'AbortError') {
-                    console.error('Internal fetch timed out after', INTERNAL_FETCH_TIMEOUT_MS, 'ms');
-                  } else {
-                    console.error('Internal fetch error:', fetchError);
-                  }
-                }
-                return undefined;
-              }
-              return data;
-            } catch (error: unknown) {
-              console.error('Unexpected error in stream processing:', error);
-
-              // Handle stream premature close error
-              const nodeError = error as NodeError;
-              if (nodeError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                abortController.abort();
-                return undefined;
-              }
-
-              // Re-throw other errors
-              throw error;
-            }
-          }).pipeThrough(new SSESerializerTransform()));
-        }
-
-        const [originalStream, clonedStream] = payload.tee();
-        const read = async (stream: ReadableStream): Promise<void> => {
-          const reader = stream.getReader();
-          try {
-            while (true) {
-              const { done: streamDone, value } = await reader.read();
-              if (streamDone) break;
-              // Process the value if needed
-              const dataStr = new TextDecoder().decode(value);
-              if (!dataStr.startsWith("event: message_delta")) {
-                continue;
-              }
-              const str = dataStr.slice(27);
-              try {
-                const message = JSON.parse(str);
-                sessionUsageCache.put(routerReq.sessionId!, message.usage);
-              } catch {
-                // Ignore parse errors
-              }
-            }
-          } catch (readError: unknown) {
-            const nodeError = readError as NodeError;
-            if (nodeError.name === 'AbortError' || nodeError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-              console.error('Background read stream closed prematurely');
-            } else {
-              console.error('Error in background stream reading:', readError);
-            }
-          } finally {
-            reader.releaseLock();
-          }
-        };
-        read(clonedStream);
-        return done(null, originalStream);
-      }
-      const payloadWithUsage = payload as StreamPayloadWithUsage;
-      sessionUsageCache.put(routerReq.sessionId!, payloadWithUsage.usage!);
-      if (typeof payload === 'object' && payload !== null) {
-        if (payloadWithUsage.error) {
-          return done(payloadWithUsage.error, null);
-        } else {
-          return done(null, payload);
-        }
-      }
+    // Only process /v1/messages requests with a session ID
+    if (!shouldProcessRequest(req, routerReq)) {
+      return handleNonMessagePayload(payload, done);
     }
+
+    // Handle streaming responses
+    if (payload instanceof ReadableStream) {
+      // Process agent tool calls if agents are active
+      if (routerReq.agents) {
+        const processedStream = processAgentStream(payload, routerReq, config as AppConfig);
+        return done(null, processedStream);
+      }
+
+      // Track usage from stream in background
+      const [originalStream, clonedStream] = payload.tee();
+      trackStreamUsage(clonedStream, routerReq.sessionId!);
+      return done(null, originalStream);
+    }
+
+    // Handle non-streaming responses
+    const payloadWithUsage = payload as StreamPayloadWithUsage;
+    sessionUsageCache.put(routerReq.sessionId!, payloadWithUsage.usage!);
+
+    if (typeof payload === 'object' && payload !== null) {
+      if (payloadWithUsage.error) {
+        return done(payloadWithUsage.error, null);
+      }
+      return done(null, payload);
+    }
+
+    done(null, payload);
+  });
+
+  // Helper to handle non-message payloads with error checking
+  function handleNonMessagePayload(payload: unknown, done: OnSendDoneCallback): void {
     const payloadWithError = payload as StreamPayloadWithUsage;
     if (typeof payload === 'object' && payload !== null && payloadWithError.error) {
       return done(payloadWithError.error, null);
     }
     done(null, payload);
-  });
+  }
 
   // Event emission hook for external listeners
   server.addHook("onSend", async (req: FastifyRequest, reply: FastifyReply, payload: unknown) => {
