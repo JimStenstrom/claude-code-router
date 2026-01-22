@@ -397,7 +397,8 @@ function canDisplayNerdFonts(): boolean {
 
 // Check if specific Unicode character can be displayed correctly
 // This is a simple heuristic check
-function canDisplayUnicodeCharacter(char: string): boolean {
+// Note: char parameter reserved for future character-specific detection
+function canDisplayUnicodeCharacter(_char: string): boolean {
   // For Nerd Fonts icons, we assume UTF-8 supporting terminals can display them
   // But it's actually difficult to detect accurately, so we rely on environment variables and terminal type detection
   try {

@@ -7,14 +7,31 @@ import { execSync } from 'child_process';
 const LOCK_FILE = `${REFERENCE_COUNT_FILE}.lock`;
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_INTERVAL_MS = 50;
+const MAX_LOCK_RETRIES = 100; // 100 retries * 50ms = 5 seconds max
+
+/**
+ * Synchronous sleep using spawnSync
+ * More CPU-friendly than busy-wait loop
+ */
+function syncSleep(ms: number): void {
+    try {
+        // Use node's built-in setTimeout via child process for cross-platform sleep
+        require('child_process').spawnSync('node', ['-e', `setTimeout(() => {}, ${ms})`], {
+            timeout: ms + 100
+        });
+    } catch {
+        // Fallback: short busy wait if spawn fails (shouldn't happen)
+        const end = Date.now() + ms;
+        while (Date.now() < end) { /* fallback busy wait */ }
+    }
+}
 
 /**
  * Acquire a file lock with timeout
  * Returns true if lock acquired, false otherwise
  */
 function acquireLock(): boolean {
-    const startTime = Date.now();
-    while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+    for (let retry = 0; retry < MAX_LOCK_RETRIES; retry++) {
         try {
             // O_CREAT | O_EXCL - fails if file exists (atomic check-and-create)
             const fd = openSync(LOCK_FILE, 'wx');
@@ -32,9 +49,8 @@ function acquireLock(): boolean {
                     }
                 } catch { /* ignore stat errors */ }
 
-                // Wait before retrying
-                const waitUntil = Date.now() + LOCK_RETRY_INTERVAL_MS;
-                while (Date.now() < waitUntil) { /* busy wait */ }
+                // Wait before retrying using non-busy sleep
+                syncSleep(LOCK_RETRY_INTERVAL_MS);
             } else {
                 // Other error, fail immediately
                 return false;
@@ -102,11 +118,26 @@ export function decrementReferenceCount(): void {
     }
 }
 
+/**
+ * Get the current reference count with file locking for consistency
+ */
 export function getReferenceCount(): number {
     if (!existsSync(REFERENCE_COUNT_FILE)) {
         return 0;
     }
-    return parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+    if (!acquireLock()) {
+        // If we can't get the lock, still try to read (best effort)
+        try {
+            return parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+        } catch {
+            return 0;
+        }
+    }
+    try {
+        return parseInt(readFileSync(REFERENCE_COUNT_FILE, 'utf-8')) || 0;
+    } finally {
+        releaseLock();
+    }
 }
 
 export function isServiceRunning(): boolean {

@@ -89,8 +89,9 @@ export const readConfigFile = async () => {
       console.error("Please check your config file syntax.");
       process.exit(1);
     }
-  } catch (readError: any) {
-    if (readError.code === "ENOENT") {
+  } catch (readError: unknown) {
+    const fsError = readError as NodeJS.ErrnoException;
+    if (fsError.code === "ENOENT") {
       // Config file doesn't exist, prompt user for initial setup
       try {
         // Initialize directories
@@ -117,16 +118,17 @@ export const readConfigFile = async () => {
             "Please edit this file with your actual configuration."
         );
         return config
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as Error;
         console.error(
             "Failed to create default configuration:",
-            error.message
+            err.message
         );
         process.exit(1);
       }
     } else {
       console.error(`Failed to read config file at ${CONFIG_FILE}`);
-      console.error("Error details:", readError.message);
+      console.error("Error details:", fsError.message);
       process.exit(1);
     }
   }
@@ -176,9 +178,32 @@ export const writeConfigFile = async (config: Partial<AppConfig>) => {
   await fs.writeFile(CONFIG_FILE, configWithComment);
 };
 
+/**
+ * Safe environment variable keys that can be copied from config
+ * Excludes sensitive data like API keys and provider configurations
+ */
+const SAFE_ENV_KEYS = [
+  'HOST',
+  'PORT',
+  'LOG',
+  'LOG_LEVEL',
+  'API_TIMEOUT_MS',
+  'PROXY_URL',
+  'CLAUDE_PATH',
+  'CUSTOM_ROUTER_PATH',
+  'REWRITE_SYSTEM_PROMPT',
+  'NON_INTERACTIVE_MODE',
+] as const;
+
 export const initConfig = async () => {
   const config = await readConfigFile();
-  Object.assign(process.env, config);
+  // Only copy safe, non-sensitive config values to environment
+  // Avoids exposing API keys and provider credentials
+  for (const key of SAFE_ENV_KEYS) {
+    if (config[key] !== undefined) {
+      process.env[key] = String(config[key]);
+    }
+  }
   return config;
 };
 
