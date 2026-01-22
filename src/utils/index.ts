@@ -75,14 +75,14 @@ const confirm = async (query: string): Promise<boolean> => {
   return answer.toLowerCase() !== "n";
 };
 
-export const readConfigFile = async () => {
+export const readConfigFile = async (): Promise<AppConfig> => {
   try {
     const config = await fs.readFile(CONFIG_FILE, "utf-8");
     try {
       // Try to parse with JSON5 first (which also supports standard JSON)
       const parsedConfig = JSON5.parse(config);
       // Interpolate environment variables in the parsed config
-      return interpolateEnvVars(parsedConfig);
+      return interpolateEnvVars(parsedConfig) as unknown as AppConfig;
     } catch (parseError) {
       console.error(`Failed to parse config file at ${CONFIG_FILE}`);
       console.error("Error details:", (parseError as Error).message);
@@ -104,10 +104,12 @@ export const readConfigFile = async () => {
               `Backed up existing configuration file to ${backupPath}`
           );
         }
-        const config = {
+        const config: AppConfig = {
           PORT: 3456,
           Providers: [],
-          Router: {},
+          Router: {
+            default: "anthropic,claude-sonnet-4-20250514",
+          },
         }
         // Create a minimal default config file
         await writeConfigFile(config);
@@ -117,7 +119,7 @@ export const readConfigFile = async () => {
         console.log(
             "Please edit this file with your actual configuration."
         );
-        return config
+        return config;
       } catch (error: unknown) {
         const err = error as Error;
         console.error(
